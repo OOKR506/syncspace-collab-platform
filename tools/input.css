@@ -1,0 +1,226 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+  :root{
+    --bg:#F7F8FA; --surface:#FFFFFF; --surface-2:#F1F3F6;
+    --border:#E5E8EE; --border-strong:#D8DCE5;
+    --text:#101828; --text-2:#475467; --text-3:#98A2B3;
+    --primary:#4F46E5; --primary-hover:#4338CA; --primary-soft:#EEF0FF; --primary-soft-text:#4338CA;
+    --danger:#E11D48; --danger-soft:#FEF1F3;
+    --success:#059669; --success-soft:#ECFDF5;
+    --warning:#D97706; --warning-soft:#FFFBEB;
+    --info:#2563EB; --info-soft:#EFF6FF;
+    --ring: 79 70 229;
+  }
+  .dark{
+    --bg:#1C2233; --surface:#252D40; --surface-2:#2E374D;
+    --border:#3A455E; --border-strong:#4A5672;
+    --text:#F1F5F9; --text-2:#AEBACD; --text-3:#8593AA;
+    --primary:#6366F1; --primary-hover:#818CF8; --primary-soft:#2E3560; --primary-soft-text:#A5B4FC;
+    --danger:#FB7185; --danger-soft:#3D2733;
+    --success:#34D399; --success-soft:#20403A;
+    --warning:#FBBF24; --warning-soft:#3D3622;
+    --info:#60A5FA; --info-soft:#203551;
+  }
+
+  *{ font-family:'Noto Sans KR','Inter',system-ui,sans-serif; }
+  html,body{ background:var(--bg); }
+  ::-webkit-scrollbar{ width:8px; height:8px; }
+  ::-webkit-scrollbar-track{ background:transparent; }
+  ::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:8px; }
+
+  @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes fadeInFast{from{opacity:0}to{opacity:1}}
+  @keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+  .animate-fade{ animation:fadeIn .25s ease both; }
+  .animate-fade-fast{ animation:fadeInFast .15s ease both; }
+  .animate-modal{ animation:slideUp .22s cubic-bezier(.16,1,.3,1) both; }
+  .skeleton{
+    background:linear-gradient(90deg, var(--surface-2) 25%, var(--border) 37%, var(--surface-2) 63%);
+    background-size:400% 100%;
+    animation:shimmer 1.4s ease infinite;
+    border-radius:8px;
+  }
+  @media (prefers-reduced-motion: reduce){
+    .animate-fade,.animate-fade-fast,.animate-modal,.skeleton{ animation:none !important; }
+  }
+
+  /* ---- Typography scale ---- */
+  .text-page-title{ @apply text-[22px] leading-tight font-bold tracking-tight; color:var(--text); }
+  .text-section-title{ @apply text-[15px] font-bold; color:var(--text); }
+  .text-card-title{ @apply text-[14px] font-semibold; color:var(--text); }
+  .text-body{ @apply text-[13.5px]; color:var(--text-2); }
+  .text-meta{ @apply text-[12px]; color:var(--text-3); }
+
+  /* ---- Buttons ---- */
+  .btn{ @apply inline-flex items-center justify-center gap-1.5 text-[13px] font-semibold rounded-lg px-3.5 h-9 transition-colors duration-150 select-none disabled:opacity-50 disabled:pointer-events-none; }
+  .btn-icon{ @apply w-4 h-4 shrink-0; }
+  .btn-primary{ @apply btn text-white shadow-sm; background:var(--primary); }
+  .btn-primary:hover{ background:var(--primary-hover); }
+  .btn-secondary{ @apply btn; background:var(--surface); color:var(--text); border:1px solid var(--border-strong); }
+  .btn-secondary:hover{ background:var(--surface-2); }
+  .btn-ghost{ @apply btn; background:transparent; color:var(--text-2); }
+  .btn-ghost:hover{ background:var(--surface-2); color:var(--text); }
+  .btn-danger{ @apply btn text-white; background:var(--danger); }
+  .btn-danger:hover{ filter:brightness(0.92); }
+  .btn-sm{ @apply h-8 px-3 text-[12.5px]; }
+  .icon-btn{ @apply relative w-9 h-9 rounded-lg flex items-center justify-center shrink-0 transition-colors; color:var(--text-2); }
+  .icon-btn:hover{ background:var(--surface-2); color:var(--text); }
+
+  /* ---- Card / Surface ---- */
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:14px; box-shadow:0 1px 2px rgba(16,24,40,.03); }
+  .card-pad{ @apply p-5; }
+  .surface-2{ background:var(--surface-2); }
+
+  /* ---- Inputs ---- */
+  .field-label{ @apply text-[12.5px] font-medium mb-1.5 block; color:var(--text-2); }
+  .input{ @apply w-full h-10 px-3.5 rounded-lg text-[13.5px] outline-none transition-shadow; background:var(--surface); border:1px solid var(--border-strong); color:var(--text); }
+  .input::placeholder{ color:var(--text-3); }
+  .input:focus{ border-color:var(--primary); box-shadow:0 0 0 3px rgb(var(--ring)/0.15); }
+  textarea.input{ @apply h-auto py-2.5; }
+
+  /* ---- Badges ---- */
+  .badge{ @apply inline-flex items-center gap-1 text-[11.5px] font-semibold px-2 py-0.5 rounded-full leading-normal; }
+  .badge-primary{ @apply badge; background:var(--primary-soft); color:var(--primary-soft-text); }
+  .badge-success{ @apply badge; background:var(--success-soft); color:var(--success); }
+  .badge-warning{ @apply badge; background:var(--warning-soft); color:var(--warning); }
+  .badge-danger{ @apply badge; background:var(--danger-soft); color:var(--danger); }
+  .badge-neutral{ @apply badge; background:var(--surface-2); color:var(--text-2); }
+
+  /* ---- Sidebar ---- */
+  .nav-group-title{ @apply text-[11px] font-bold uppercase tracking-wider px-3 pt-4 pb-1.5; color:var(--text-3); }
+  .nav-item{ @apply w-full flex items-center gap-2.5 px-3 h-9 rounded-lg text-[13.5px] font-medium transition-colors; color:var(--text-2); }
+  .nav-item:hover{ background:var(--surface-2); color:var(--text); }
+  .nav-item.active{ background:var(--primary-soft); color:var(--primary-soft-text); font-weight:600; }
+  .nav-item svg{ width:17px; height:17px; shrink:0; color:var(--text-3); }
+  .nav-item:hover svg, .nav-item.active svg{ color:currentColor; }
+  /* 프로젝트 미선택 시에도 흐리게 처리하지 않고 다른 메뉴와 동일한 색을 유지한다.
+     (클릭하면 showView()가 자동으로 프로젝트 선택기를 열어준다) */
+
+  /* ---- Modal ---- */
+  .modal-backdrop{ background:rgba(15,18,26,.5); backdrop-filter: blur(2px); }
+  .modal-panel{ background:var(--surface); border:1px solid var(--border); border-radius:16px; box-shadow:0 20px 40px -12px rgba(16,24,40,.25); }
+  .modal-header{ @apply flex items-center justify-between px-5 py-4 border-b; border-color:var(--border); }
+  .modal-body{ @apply px-5 py-4; }
+  .modal-footer{ @apply flex items-center justify-end gap-2 px-5 py-4 border-t; border-color:var(--border); }
+
+  /* ---- Avatar ---- */
+  .avatar{ @apply rounded-full flex items-center justify-center shrink-0; background:var(--surface-2); }
+
+  /* ---- 아이콘 타일 (고급스러운 배경 처리) ---- */
+  .icon-tile{
+    background: linear-gradient(160deg, var(--surface) 0%, var(--surface-2) 100%);
+    border: 1px solid var(--border);
+    box-shadow: 0 1px 2px rgba(16,24,40,.05), inset 0 1px 0 rgba(255,255,255,.6);
+  }
+  .dark .icon-tile{ box-shadow: 0 1px 2px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.04); }
+  .icon-tile-soft{
+    background: linear-gradient(160deg, var(--surface) -20%, var(--primary-soft) 120%);
+    border: 1px solid var(--border);
+    box-shadow: 0 1px 2px rgba(16,24,40,.05), inset 0 1px 0 rgba(255,255,255,.6);
+  }
+  .dark .icon-tile-soft{ box-shadow: 0 1px 2px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.04); }
+  .icon-tile-brand{
+    background: linear-gradient(160deg, var(--primary) 0%, var(--primary-hover) 100%);
+    box-shadow: 0 3px 8px rgb(var(--ring)/.4), inset 0 1px 0 rgba(255,255,255,.3);
+  }
+
+  /* ---- KPI ---- */
+  .kpi-icon{ @apply w-9 h-9 rounded-xl flex items-center justify-center shrink-0; border:1px solid var(--border); box-shadow:0 1px 2px rgba(16,24,40,.05), inset 0 1px 0 rgba(255,255,255,.5); }
+  .dark .kpi-icon{ box-shadow:0 1px 2px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.04); }
+
+  /* ---- Kanban ---- */
+  .kanban-col{ @apply rounded-2xl p-3 flex flex-col; background:var(--surface-2); min-width:280px; }
+  .kanban-dropzone{ @apply rounded-xl p-2 flex-1 transition-colors duration-150; min-height:120px; }
+  .kanban-dropzone.drag-over{ background:var(--primary-soft); outline:2px dashed var(--primary); outline-offset:-2px; }
+  .task-card{ background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:12px; cursor:grab; transition: box-shadow .15s, border-color .15s, transform .15s; }
+  .task-card:hover{ box-shadow:0 4px 12px rgba(16,24,40,.08); border-color:var(--border-strong); }
+  .task-card.dragging{ opacity:.4; }
+
+  /* ---- Toast ---- */
+  .toast{ @apply flex items-center gap-2.5 px-4 py-3 rounded-xl text-[13px] font-medium shadow-lg; animation:slideUp .2s ease both; max-width:min(90vw,360px); }
+
+  /* ---- Progress ---- */
+  .progress-track{ @apply w-full rounded-full overflow-hidden; background:var(--surface-2); }
+  .progress-fill{ @apply h-full rounded-full transition-all duration-500; background:var(--primary); }
+
+  .line-clamp-2{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .divide-hair > * + *{ border-top:1px solid var(--border); }
+
+/* =====================================================================
+   모바일 최적화 (휴대폰 / PWA 설치 화면)
+   ===================================================================== */
+html{ -webkit-text-size-adjust:100%; text-size-adjust:100%; -webkit-tap-highlight-color:transparent; }
+body{ overscroll-behavior-y:none; }
+button,[onclick],select,.input{ touch-action:manipulation; }   /* 더블탭 확대 지연 제거 */
+
+/* 아이폰 노치/홈 바 영역(safe area) 대응 — viewport-fit=cover 와 함께 동작 */
+.app-topbar{ height:calc(3.5rem + env(safe-area-inset-top)); padding-top:env(safe-area-inset-top); }
+.app-tabbar{ height:calc(4rem + env(safe-area-inset-bottom)); padding-bottom:env(safe-area-inset-bottom); }
+
+@media (max-width:1023px){
+  #content{ padding-bottom:calc(5rem + env(safe-area-inset-bottom)); }
+  #toast-root{ bottom:calc(5rem + env(safe-area-inset-bottom)); }
+  #offline-banner{ padding-top:calc(.375rem + env(safe-area-inset-top)); }
+  #sidebar{ padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom); max-width:85vw; }
+  .app-tabbar button{ min-width:0; }
+  .app-tabbar button span{ white-space:nowrap; }
+}
+
+/* 입력창 글자가 16px 미만이면 iOS Safari 가 입력할 때마다 화면을 확대한다 → 모바일에서는 16px 고정 */
+@media (max-width:1023px){
+  input,select,textarea,.input{ font-size:16px !important; }
+  .input{ height:2.75rem; }
+  textarea.input{ height:auto; }
+  .btn{ height:2.75rem; }
+  .btn-sm{ height:2.25rem; }
+  .icon-btn{ width:2.75rem; height:2.75rem; }
+  .nav-item{ height:2.75rem; }
+  input[type="checkbox"],input[type="radio"]{ min-width:18px; min-height:18px; }
+}
+
+/* 작은 화면: 좌우 여백 축소, 모달은 아래에서 올라오는 시트로 */
+@media (max-width:639px){
+  #content .px-6{ padding-left:1rem; padding-right:1rem; }
+  .text-page-title{ font-size:20px; }
+  .modal-backdrop{ align-items:flex-end !important; padding:0 !important; }
+  .modal-panel{
+    max-width:100% !important; width:100% !important;
+    max-height:92dvh !important;
+    border-radius:18px 18px 0 0 !important; border-bottom:0 !important;
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  .modal-header{ padding:.875rem 1rem; }
+  .modal-body{ padding:.875rem 1rem; }
+  .modal-footer{ padding:.75rem 1rem; }
+  .modal-footer .btn-primary,.modal-footer .btn-secondary,.modal-footer .btn-danger{ flex:1; }
+  .toast{ max-width:92vw; }
+  .kanban-col{ min-width:0; width:100%; }
+}
+
+/* 칸반: 손가락으로 옆으로 밀 때 한 컬럼씩 맞춰 멈추도록 */
+@media (max-width:1023px){
+  .kanban-scroll{ scroll-snap-type:x mandatory; -webkit-overflow-scrolling:touch; }
+  .task-card{ cursor:pointer; }
+}
+
+/* 가로 스크롤바를 모바일에서 얇게 */
+@media (max-width:1023px){ ::-webkit-scrollbar{ width:4px; height:4px; } }
+
+/* 설치형(PWA) 실행 시 주소창이 없으므로 화면 전체 높이 사용 */
+@media (display-mode:standalone){ body{ -webkit-user-select:none; user-select:none; } input,textarea,[contenteditable]{ -webkit-user-select:text; user-select:text; } }
+
+@media (max-width:1023px){ .bulk-bar{ bottom:calc(5rem + env(safe-area-inset-bottom)); max-width:94vw; } }
+
+/* 버튼 글자가 좁은 화면에서 세로로 줄바꿈되는 것 방지 */
+.btn{ white-space:nowrap; }
+/* 팀 채팅: 입력창이 하단 탭바 뒤에 가려지지 않도록 높이를 계산 */
+.chat-shell{ height:calc(100vh - 64px); }
+@media (max-width:1023px){ .chat-shell{ height:calc(100vh - 7.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)); height:calc(100dvh - 7.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)); } }
+
+/* 폰 사이드 메뉴 뒤 배경: 흐림(blur) 없이 어둡게만 (흐릿해 보이는 문제 방지) */
+.drawer-dim{ background:rgba(15,18,26,.45); }
+@media (max-width:1023px){ #sidebar{ background:var(--surface) !important; box-shadow:0 0 40px rgba(0,0,0,.25); } }
+@media (max-width:1023px){ .kanban-scroll{ overflow-x:visible; } }

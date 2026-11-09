@@ -1,0 +1,35 @@
+rules_version = '2';
+
+// ============================================================================
+// Syncspace - Firebase Storage 보안 규칙 (초안)
+// ----------------------------------------------------------------------------
+// firebase-storage.js의 ssUploadTaskFile()이 'tasks/{taskId}/파일명' 경로에
+// 업로드합니다. 어떤 작업(taskId)이 어느 프로젝트 소속인지는 Firestore의
+// tasks/{taskId}.projectId 문서를 조회해야 알 수 있어, 아래 규칙은 Storage
+// 규칙에서 Firestore 문서를 조회(firestore.get)해 같은 프로젝트 팀원만
+// 읽기/쓰기가 가능하도록 제한합니다.
+//
+// 적용 방법은 firestore.rules 상단 안내와 동일합니다: 먼저 Rules Playground로
+// 시뮬레이션 → 가능하면 테스트 프로젝트에서 파일 업로드/다운로드 확인 →
+// 프로덕션 배포. 기존 앱 코드는 전혀 건드리지 않았습니다.
+// ============================================================================
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isProjectMemberOfTask(taskId) {
+      let task = firestore.get(/databases/(default)/documents/tasks/$(taskId)).data;
+      let proj = firestore.get(/databases/(default)/documents/projects/$(task.projectId)).data;
+      return request.auth != null && request.auth.uid in proj.members;
+    }
+
+    match /tasks/{taskId}/{fileName} {
+      allow read, write: if isProjectMemberOfTask(taskId);
+    }
+
+    // 그 외 경로는 기본 차단
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

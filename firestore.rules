@@ -1,0 +1,249 @@
+rules_version = '2';
+
+// ============================================================================
+// Syncspace - Firestore 보안 규칙 (초안)
+// ----------------------------------------------------------------------------
+// 지금까지는 Firebase 콘솔 "테스트 모드" 기본 규칙(로그인만 하면 전부 읽기/쓰기 허용,
+// 또는 그마저도 없는 완전 공개)으로 동작하고 있었습니다. firebase-projects.js의
+// ssJoinProjectByToken() 주석에도 적혀 있듯 "실제 접근 제어는 보안 규칙의 몫"이라는
+// 부분이 계속 비어 있었는데, 이 파일이 그 첫 버전입니다.
+//
+// ⚠️ 적용 방법 (중요, 반드시 순서대로):
+// 1) Firebase 콘솔 > Firestore Database > 규칙(Rules) 탭에서 "규칙 놀이터(Rules
+//    Playground)"로 아래 규칙을 먼저 시뮬레이션 해보세요 (로그인 사용자로 프로젝트
+//    읽기/쓰기, 팀원 아닌 사용자로 접근 시도 등).
+// 2) 가능하면 별도 테스트용 Firebase 프로젝트에 먼저 배포해서 앱이 정상 동작하는지
+//    (로그인, 프로젝트 생성, 칸반 이동, 초대, 채팅 등 최대한 많이) 확인하세요.
+// 3) 문제 없으면 실제(프로덕션) 프로젝트에 배포하세요. 이 파일 하나 때문에 기존 앱
+//    코드(app-v3.js, firebase-*.js)는 전혀 수정하지 않았습니다 — 순수하게 서버 측
+//    권한 검증만 추가하는 파일입니다.
+// 4) 배포 후 화면에서 "권한이 없습니다(permission-denied)" 오류가 뜨는 화면이 있다면
+//    그 화면에서 어떤 컬렉션을 읽고/쓰려 했는지 알려주시면 규칙을 다시 조정하겠습니다.
+//    (예: 특정 신규 기능이 이 규칙에서 빠져 있을 수 있음 — 완전 자동 생성이라
+//    100% 완벽을 보장하진 않습니다.)
+// ============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- 공용 헬퍼 함수 ----------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isProjectMember(projectId) {
+      return isSignedIn() &&
+        request.auth.uid in get(/databases/$(database)/documents/projects/$(projectId)).data.members;
+    }
+
+    function projectRole(projectId) {
+      let proj = get(/databases/$(database)/documents/projects/$(projectId)).data;
+      return proj.memberRoles != null && proj.memberRoles[request.auth.uid] != null
+        ? proj.memberRoles[request.auth.uid]
+        : null;
+    }
+
+    function isProjectEditorOrOwner(projectId) {
+      let role = projectRole(projectId);
+      return isProjectMember(projectId) && (role == 'owner' || role == 'editor' || role == null);
+      // role == null 허용 이유: memberRoles가 없던 예전 프로젝트/멤버 데이터와의 하위 호환.
+      // (memberRoles가 신규 기능으로 나중에 추가됐으므로, 이 필드가 없는 기존 문서를 막지 않기 위함)
+    }
+
+    function isProjectOwner(projectId) {
+      return isProjectMember(projectId) && projectRole(projectId) == 'owner';
+    }
+
+    function isPubliclyShared(projectId) {
+      let proj = get(/databases/$(database)/documents/projects/$(projectId)).data;
+      return proj.shareEnabled == true;
+    }
+
+    // ---- users ---------------------------------------------------------------
+    // 다른 회원의 이름/아바타를 목록/멘션/담당자 지정 등에서 보여줘야 하므로
+    // 로그인한 사용자는 누구나 읽을 수 있게 하되, 본인 문서만 쓸 수 있게 합니다.
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && request.auth.uid == userId;
+      // 계정 삭제(profile 화면의 "계정 삭제") 시 본인 프로필 문서만 스스로 지울 수 있음
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ---- projects --------------------------------------------------------
+    match /projects/{projectId} {
+      allow read: if isSignedIn() &&
+        (request.auth.uid in resource.data.members || resource.data.shareEnabled == true);
+      // 읽기 전용 공유 링크(renderPublicShareView)는 로그인 없이도 접근하므로 별도 허용
+      allow get: if resource.data.shareEnabled == true;
+
+      allow create: if isSignedIn() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        request.auth.uid in request.resource.data.members;
+
+      // 일반 수정(owner/editor) 또는 QR·링크로 자기 자신을 멤버로 추가하는 경우(join),
+      // 또는 이메일 초대를 수락해 자기 자신을 멤버로 추가하는 경우를 허용.
+      // 단, ownerId(소유권 이전), status(삭제/보관), parts(파트 추가·삭제)는 오너만 바꿀 수 있도록 별도로 좁힌다 —
+      // 앱 UI는 이미 오너에게만 이 버튼들을 보여주지만, 지금까지 규칙은 editor도 서버로
+      // 직접 요청하면 삭제/소유권 이전이 가능한 상태였다.
+      allow update: if isSignedIn() && (
+        isProjectOwner(projectId) ||
+        (
+          isProjectEditorOrOwner(projectId) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['ownerId', 'status', 'parts'])
+        ) ||
+        (
+          resource.data.joinEnabled == true &&
+          request.resource.data.joinToken == resource.data.joinToken &&
+          request.auth.uid in request.resource.data.members
+        ) ||
+        (
+          // 이메일 초대 수락: invites/{projectId_내uid} 문서가 나에게 온 pending 초대일 때만,
+          // 그리고 members/memberEmails/memberRoles 외의 다른 필드는 손대지 않을 때만 허용한다.
+          request.auth.uid in request.resource.data.members &&
+          !(request.auth.uid in resource.data.members) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'memberEmails', 'memberRoles']) &&
+          exists(/databases/$(database)/documents/invites/$(projectId + '_' + request.auth.uid)) &&
+          get(/databases/$(database)/documents/invites/$(projectId + '_' + request.auth.uid)).data.invitedUid == request.auth.uid &&
+          get(/databases/$(database)/documents/invites/$(projectId + '_' + request.auth.uid)).data.status == 'pending'
+        )
+      );
+
+      allow delete: if false; // 앱은 소프트 삭제(status:'deleted')만 사용, 실제 삭제는 막음
+
+      // 팀 채팅 서브컬렉션
+      match /chat/{messageId} {
+        allow read, create: if isProjectMember(projectId);
+        allow update, delete: if isSignedIn() &&
+          (resource.data.authorId == request.auth.uid || isProjectOwner(projectId));
+      }
+    }
+
+    // ---- invites (이메일 초대 — 수락해야 참여되는 방식) ----------------------------
+    // 문서 ID는 {projectId}_{초대받은uid} 고정 형식(ssInviteDocId와 동일)이라,
+    // projects 규칙에서 "나에게 온 pending 초대가 있는지"를 get()으로 직접 확인할 수 있다.
+    match /invites/{inviteId} {
+      allow read: if isSignedIn() &&
+        (request.auth.uid == resource.data.invitedUid || isProjectMember(resource.data.projectId));
+
+      function isFreshValidInvite() {
+        return inviteId == (request.resource.data.projectId + '_' + request.resource.data.invitedUid) &&
+          request.resource.data.invitedByUid == request.auth.uid &&
+          request.resource.data.status == 'pending' &&
+          isProjectEditorOrOwner(request.resource.data.projectId);
+      }
+      allow create: if isSignedIn() && isFreshValidInvite();
+
+      allow update: if isSignedIn() && (
+        (
+          // 초대받은 사람: 수락/거절만 가능, status 외 변경 불가
+          request.auth.uid == resource.data.invitedUid &&
+          resource.data.status == 'pending' &&
+          request.resource.data.status in ['accepted', 'declined'] &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        ) ||
+        (
+          // 초대를 보낸 쪽(오너/에디터): 대기 중인 초대 취소, status 외 변경 불가
+          isProjectEditorOrOwner(resource.data.projectId) &&
+          resource.data.status == 'pending' &&
+          request.resource.data.status == 'cancelled' &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        ) ||
+        (
+          // 재초대: 이전 초대가 대기 중이 아닐 때(거절/취소/수락됨)만 완전히 새 pending 초대로 덮어쓸 수 있음
+          resource.data.status != 'pending' &&
+          request.resource.data.projectId == resource.data.projectId &&
+          request.resource.data.invitedUid == resource.data.invitedUid &&
+          isFreshValidInvite()
+        )
+      );
+
+      allow delete: if false;
+    }
+
+    // ---- tasks -------------------------------------------------------------
+    match /tasks/{taskId} {
+      allow read: if isProjectMember(request.resource.data.projectId) ||
+        isProjectMember(resource.data.projectId);
+      allow create: if isProjectEditorOrOwner(request.resource.data.projectId);
+      allow update: if isProjectEditorOrOwner(resource.data.projectId);
+      allow delete: if isProjectEditorOrOwner(resource.data.projectId);
+
+      match /comments/{commentId} {
+        allow read: if isProjectMember(get(/databases/$(database)/documents/tasks/$(taskId)).data.projectId);
+        allow create: if isSignedIn() &&
+          isProjectMember(get(/databases/$(database)/documents/tasks/$(taskId)).data.projectId) &&
+          request.resource.data.authorId == request.auth.uid;
+        allow update, delete: if isSignedIn() &&
+          (resource.data.authorId == request.auth.uid ||
+           isProjectOwner(get(/databases/$(database)/documents/tasks/$(taskId)).data.projectId));
+      }
+    }
+
+    // ---- events (캘린더) -----------------------------------------------------
+    match /events/{eventId} {
+      allow read: if isProjectMember(request.resource.data.projectId) ||
+        isProjectMember(resource.data.projectId);
+      allow create: if isProjectEditorOrOwner(request.resource.data.projectId);
+      allow update, delete: if isProjectEditorOrOwner(resource.data.projectId);
+    }
+
+    // ---- memberProgress (파트별 진행률) --------------------------------------------
+    // 문서 ID는 {projectId}_{uid} 고정.
+    //  - 읽기: 프로젝트 멤버
+    //  - 본인 문서: 본인이 파트/진행률을 자유롭게 생성·수정
+    //  - 오너(관리자): 팀원에게 파트를 지정할 수 있다. 다른 사람 문서는 role/assignedBy/updatedAt 만 바꿀 수 있고
+    //    진행률(percent)은 건드릴 수 없다. 새로 만들 때는 그 프로젝트 멤버에 대해서만 가능.
+    match /memberProgress/{docId} {
+      allow read: if isSignedIn() && isProjectMember(resource.data.projectId);
+      allow create: if isSignedIn() &&
+        docId == (request.resource.data.projectId + '_' + request.resource.data.uid) &&
+        request.resource.data.percent is number &&
+        request.resource.data.percent >= 0 && request.resource.data.percent <= 100 &&
+        (
+          (request.resource.data.uid == request.auth.uid && isProjectMember(request.resource.data.projectId)) ||
+          (
+            isProjectOwner(request.resource.data.projectId) &&
+            request.resource.data.uid in get(/databases/$(database)/documents/projects/$(request.resource.data.projectId)).data.members
+          )
+        );
+      allow update: if isSignedIn() &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.projectId == resource.data.projectId &&
+        request.resource.data.percent is number &&
+        request.resource.data.percent >= 0 && request.resource.data.percent <= 100 &&
+        (
+          (resource.data.uid == request.auth.uid && isProjectMember(resource.data.projectId)) ||
+          (
+            isProjectOwner(resource.data.projectId) &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'assignedBy', 'updatedAt'])
+          )
+        );
+      allow delete: if false;
+    }
+
+    // ---- activity (활동 로그) --------------------------------------------------
+    match /activity/{entryId} {
+      allow read: if isProjectMember(resource.data.projectId);
+      allow create: if isProjectMember(request.resource.data.projectId);
+      allow update, delete: if false; // 로그는 수정/삭제 불가
+    }
+
+
+    // ---- notifications ---------------------------------------------------
+    match /notifications/{notifId} {
+      allow read, update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn(); // 다른 사용자가 나에게 알림을 만들어줄 수 있어야 함(담당자 지정 등)
+    }
+
+    // ---- templates (개인 템플릿) -----------------------------------------------
+    match /templates/{templateId} {
+      allow read, update, delete: if isSignedIn() && resource.data.creatorId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.creatorId == request.auth.uid;
+    }
+
+    // 그 외 명시되지 않은 컬렉션은 기본적으로 차단
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

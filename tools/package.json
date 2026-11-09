@@ -1,0 +1,9 @@
+{
+  "name": "syncspace-styles",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -c tailwind.config.js -i input.css -o ../tailwind.css --minify",
+    "watch:css": "tailwindcss -c tailwind.config.js -i input.css -o ../tailwind.css --watch"
+  },
+  "devDependencies": { "tailwindcss": "3.4.17" }
+}
