@@ -30,6 +30,21 @@ async function ssGetProjects() {
     return { success: true, projects: projects };
   } catch (e) { return { success: false, projects: [] }; }
 }
+// 삭제(소프트 삭제)된 프로젝트 목록 — 보관함 화면의 '삭제한 프로젝트'에서 복구할 때 사용
+async function ssGetDeletedProjects() {
+  var user = auth.currentUser;
+  if (!user) return { projects: [] };
+  try {
+    var snap = await db.collection('projects').where('members', 'array-contains', user.uid).limit(50).get();
+    var projects = [];
+    snap.forEach(function(doc) {
+      var d = doc.data();
+      if (d.status !== 'deleted') return;
+      projects.push({ id: doc.id, ...d, createdAt: d.createdAt ? d.createdAt.toDate() : null });
+    });
+    return { success: true, projects: projects };
+  } catch (e) { return { success: false, projects: [] }; }
+}
 async function ssGetArchivedProjects() {
   var user = auth.currentUser;
   if (!user) return { projects: [] };
@@ -254,6 +269,12 @@ async function ssGetProjectMembers(projectId) {
       var u = await db.collection('users').doc(memberIds[i]).get();
       if (u.exists) members.push({ uid: memberIds[i], ...u.data() });
     }
+    // 예시 프로젝트: 화면 구성을 보여주기 위한 가상 팀원(계정 아님, DB에 저장하지 않음)
+    if (/\(예시\)\s*$/.test(proj.data().name || '')) {
+      [['demo-seoyeon','박서연','seoyeon@example.com','👩‍🎨','editor'],['demo-junho','이준호','junho@example.com','👨‍💻','editor'],
+       ['demo-doyun','최도윤','doyun@example.com','🧑‍💻','editor'],['demo-haneul','정하늘','haneul@example.com','👩‍💼','viewer']
+      ].forEach(function(d){ members.push({ uid:d[0], name:d[1], email:d[2], avatar:d[3], demo:true, demoRole:d[4] }); });
+    }
     return { success: true, members: members };
   } catch (e) { return { success: false, members: [] }; }
 }
@@ -330,6 +351,15 @@ async function ssGetMemberProgress(projectId) {
     var snap = await db.collection('memberProgress').where('projectId', '==', projectId).get();
     var items = [];
     snap.forEach(function(d){ items.push({ id: d.id, ...d.data() }); });
+    // 예시 프로젝트: 가상 팀원의 파트별 진행률(DB에 저장하지 않음)
+    try {
+      var pj = await db.collection('projects').doc(projectId).get();
+      if (pj.exists && /\(예시\)\s*$/.test(pj.data().name || '')) {
+        [['demo-seoyeon','design',85],['demo-junho','frontend',60],['demo-doyun','backend',45],['demo-haneul','qa',30]].forEach(function(d){
+          items.push({ id: projectId+'_'+d[0], projectId: projectId, uid: d[0], role: d[1], percent: d[2] });
+        });
+      }
+    } catch (e2) {}
     return { success: true, items: items };
   } catch (e) { return { success: false, items: [], error: e.message }; }
 }

@@ -6,7 +6,7 @@
 var currentUser=null,isLoggedIn=false,currentView='dashboard',currentProject=null,currentProjectId=null,allProjects=[],draggedTask=null,darkMode=localStorage.getItem('syncspace-darkmode')==='true',filterTags=[],searchQuery='',notificationCount=0;
 var todoPriorityFilter='all', todoStarredOnly=false, myTasksStarredOnly=false, todoSortBy='order';
 var bulkMode=false, selectedTaskIds=[];
-var currentLang=localStorage.getItem('syncspace-lang')||'ko';
+var currentLang='ko'; try{ localStorage.removeItem('syncspace-lang'); }catch(e){}
 const AVATARS=['😀','😎','🤩','😍','🥳','🤓','😤','🦸','🧑‍💼','🧑‍🎨','🧑‍💻','🧑‍🔬'];
 
 /* ================= 기본 유틸 ================= */
@@ -22,6 +22,50 @@ function setAuthLayout(on){
   var c=document.getElementById('content'); if(c) c.style.paddingBottom=on?'0':'';
 }
 function setContent(html){ document.getElementById('content').innerHTML=html; refreshIcons(); window.scrollTo(0,0); }
+
+/* ================= 키보드·터치 접근성 보강 =================
+   onclick만 달린 div(작업 카드·달력 칸·목록 행)를 키보드로도 쓸 수 있게 하고(Tab, Enter/Space),
+   눈에 작은 버튼은 누르는 영역만 넓힌다. 화면 구성은 건드리지 않는다. */
+(function(){
+  var timer=null;
+  function skip(e){
+    var c=(e.className||'')+'';
+    if(/modal-backdrop|modal-panel|drawer-dim/.test(c)) return true;
+    if(e.hasAttribute('ondblclick')||e.hasAttribute('tabindex')||e.getAttribute('aria-hidden')==='true') return true;
+    if(/^(BUTTON|A|INPUT|SELECT|TEXTAREA|LABEL|SUMMARY|H1|H2|H3|H4)$/.test(e.tagName)) return true;
+    return false;
+  }
+  function enhance(){
+    timer=null;
+    document.querySelectorAll('#content [onclick], #modal [onclick], #sidebar [onclick]').forEach(function(e){
+      if(skip(e)) return;
+      e.setAttribute('tabindex','0'); e.setAttribute('role','button');
+    });
+    document.querySelectorAll('#content input:not([type=hidden]):not([aria-label]), #content select:not([aria-label]), #content textarea:not([aria-label]), #modal input:not([type=hidden]):not([aria-label]), #modal select:not([aria-label]), #modal textarea:not([aria-label])').forEach(function(e){
+      if(e.closest('label')||(e.id&&document.querySelector('label[for="'+e.id+'"]'))) return;
+      var lb=e.previousElementSibling; lb=(lb&&lb.tagName==='LABEL')?lb:(e.parentNode&&e.parentNode.querySelector&&e.parentNode.querySelector('label'));
+      var name=((lb&&lb.textContent)||e.title||e.placeholder||'').replace(/\s+/g,' ').trim();
+      if(name) e.setAttribute('aria-label',name.slice(0,40));
+    });
+    document.querySelectorAll('#content button:not(.ss-hit):not(.btn):not(.icon-btn), #content a[href]:not(.ss-hit)').forEach(function(e){
+      var r=e.getBoundingClientRect();
+      if(r.width>0&&r.height>0&&(r.height<30||r.width<30)) e.classList.add('ss-hit');
+    });
+  }
+  function schedule(){ if(timer) return; timer=setTimeout(enhance,120); }
+  document.addEventListener('keydown',function(ev){
+    if(ev.key!=='Enter'&&ev.key!==' ') return;
+    var t=ev.target;
+    if(!t||t.getAttribute('role')!=='button'||!/^(DIV|SPAN|LI)$/.test(t.tagName)) return;
+    ev.preventDefault(); t.click();
+  },true);
+  function start(){
+    var host=document.body; if(!host||!window.MutationObserver) return;
+    new MutationObserver(schedule).observe(host,{childList:true,subtree:true});
+    schedule();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
+})();
 function icon(name,cls){ return '<i data-lucide="'+name+'" class="'+(cls||'w-4 h-4')+'"></i>'; }
 
 /* ================= 검색창 디바운스 =================
@@ -105,6 +149,10 @@ document.addEventListener('keydown',function(ev){
   var btns=modal.querySelectorAll('.btn-primary,.btn-danger'); var b=btns[btns.length-1];
   if(b && !b.disabled){ ev.preventDefault(); b.click(); }
 });
+/* 파일 첨부·사진 업로드 사용 여부.
+   Firebase Storage(결제 계정 필요)를 켠 뒤에만 true로 바꾼다. false면 올리기 버튼 대신 '준비 중' 안내를 보여 준다. */
+var FILE_UPLOAD_ENABLED=false;
+function ssUploadDisabledNotice(){ showToast('파일 첨부는 아직 준비 중이에요','info'); }
 /* ================= 입력 편의: 비밀번호 보기 · 임시 저장 ================= */
 function ssPwHost(el){ var p=el.parentNode; return (p && p.getAttribute && p.getAttribute('data-pwwrap'))?p:el; }
 function ssAttachPwToggle(inp){
@@ -361,6 +409,8 @@ async function loadProjects(){ var r=await ssGetProjects(); allProjects=r.projec
 function updateAuthUI(){
   var el=document.getElementById('user-area'); if(!el)return;
   el.textContent = isLoggedIn ? (currentUser.name||'사용자') : '';
+  var av=document.getElementById('side-user-avatar');
+  if(av) av.textContent = isLoggedIn ? (currentUser.avatar || (currentUser.name||'?').charAt(0)) : '?';
 }
 async function loadNotifications(){ var r=await ssGetNotifications(); var notifs=(r.notifications||[]).filter(n=>notifTypeAllowed(n.type)); notificationCount=isDndActive()?0:notifs.filter(n=>!n.read).length; updateNotificationBadge(); }
 function updateNotificationBadge(){
@@ -476,7 +526,7 @@ async function renderNotifPopoverContent(){
 var landingShown=false;
 function showLandingScreen(){
   document.getElementById('sidebar').style.display='none'; setAuthLayout(true);
-  setContent('<style>.ld{font-family:inherit;color:var(--text)}.ld *{box-sizing:border-box}.ld-hero{background:linear-gradient(160deg,#4F46E5,#7C3AED);color:#fff;padding:max(56px,env(safe-area-inset-top)) 20px 64px;text-align:center}.ld-in{max-width:960px;margin:0 auto}.ld-logo{width:56px;height:56px;border-radius:18px;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;margin:0 auto 14px}.ld-brand{font-size:15px;font-weight:700;letter-spacing:.02em;opacity:.9}.ld-hero h1{font-size:clamp(30px,6vw,46px);line-height:1.2;font-weight:800;margin:18px 0 14px}.ld-hero p{max-width:560px;margin:0 auto;font-size:16px;line-height:1.65;opacity:.92;word-break:keep-all}.ld-btns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:28px}.ld-b1{background:#fff;color:#4F46E5;font-weight:700;border:0;border-radius:12px;padding:13px 26px;font-size:16px;cursor:pointer;min-height:48px}.ld-b2{background:rgba(255,255,255,.14);color:#fff;font-weight:600;border:1px solid rgba(255,255,255,.4);border-radius:12px;padding:13px 22px;font-size:16px;cursor:pointer;min-height:48px}.ld-sec{padding:48px 20px}.ld-sec h2{font-size:24px;font-weight:800;text-align:center;margin:0 0 24px}.ld-alt{background:var(--surface-2)}.ld-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}.ld-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;min-width:0}.ld-card h3{font-size:16px;font-weight:700;margin:12px 0 6px}.ld-card p{font-size:14px;line-height:1.6;color:var(--text-2);margin:0;word-break:keep-all}.ld-ic{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:rgba(79,70,229,.12);color:#4F46E5}.ld-pain{display:flex;gap:10px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px 16px;font-size:15px;font-weight:600}.ld-num{width:34px;height:34px;border-radius:50%;background:linear-gradient(160deg,#4F46E5,#7C3AED);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center}.ld-end{text-align:center;padding:48px 20px calc(48px + env(safe-area-inset-bottom))}.ld-end h2{font-size:24px;font-weight:800;margin:0 0 20px}.ld-end .ld-b1{background:linear-gradient(160deg,#4F46E5,#7C3AED);color:#fff}.ld-lk{display:block;margin:14px auto 0;background:none;border:0;color:var(--text-2);font-size:14px;text-decoration:underline;cursor:pointer;padding:8px}.ld-foot{font-size:12px;color:var(--text-3);margin-top:28px}</style><div class="ld"><section class="ld-hero"><div class="ld-in"><div class="ld-logo">'+icon('zap','w-7 h-7')+'</div><div class="ld-brand">Syncspace</div><h1>팀 프로젝트,<br>한 곳에서 끝내세요</h1><p>Syncspace는 할 일, 일정, 역할, 소통을 한 곳에 모아 팀원 모두가 같은 화면을 보며 일할 수 있게 해주는 팀 프로젝트 협업 플랫폼입니다.</p><div class="ld-btns"><button class="ld-b1" onclick="enterAuthFromLanding()">시작하기</button><button class="ld-b2" onclick="document.getElementById(\'ld-feat\').scrollIntoView({behavior:\'smooth\'})">서비스 알아보기</button></div></div></section><section class="ld-sec"><div class="ld-in" style="max-width:640px"><h2>이런 불편, 겪어보셨나요?</h2><div style="display:grid;gap:10px"><div class="ld-pain">'+icon('help-circle','w-5 h-5')+'<span>누가 무엇을 맡았는지 헷갈려요</span></div><div class="ld-pain">'+icon('calendar-x','w-5 h-5')+'<span>일정과 마감이 여기저기 흩어져 있어요</span></div><div class="ld-pain">'+icon('eye-off','w-5 h-5')+'<span>전체 진행 상황을 한눈에 보기 어려워요</span></div></div></div></section><section class="ld-sec ld-alt" id="ld-feat"><div class="ld-in"><h2>Syncspace가 해결해요</h2><div class="ld-grid"><div class="ld-card"><div class="ld-ic">'+icon('columns-3','w-5 h-5')+'</div><h3>할 일 목록</h3><p>할 일을 만들고 담당자를 정해 “할 일 · 진행 중 · 완료”로 관리해요.</p></div><div class="ld-card"><div class="ld-ic">'+icon('calendar','w-5 h-5')+'</div><h3>캘린더</h3><p>마감일과 팀 일정을 달력에서 한눈에 확인해요.</p></div><div class="ld-card"><div class="ld-ic">'+icon('gauge','w-5 h-5')+'</div><h3>파트별 진행률</h3><p>맡은 파트별로 어디까지 진행됐는지 비교해 볼 수 있어요.</p></div><div class="ld-card"><div class="ld-ic">'+icon('message-square','w-5 h-5')+'</div><h3>팀 채팅</h3><p>프로젝트 안에서 바로 대화하고 알림도 받아요.</p></div><div class="ld-card"><div class="ld-ic">'+icon('user-plus','w-5 h-5')+'</div><h3>팀원 초대</h3><p>링크나 QR 코드로 팀원을 간편하게 초대해요.</p></div><div class="ld-card"><div class="ld-ic">'+icon('smartphone','w-5 h-5')+'</div><h3>모바일 지원</h3><p>스마트폰에서도 같은 화면으로 편하게 사용해요.</p></div></div></div></section><section class="ld-sec"><div class="ld-in"><h2>이렇게 사용해요</h2><div class="ld-grid"><div class="ld-card"><div class="ld-num">1</div><h3>가입하고 로그인</h3><p>이메일로 간단히 계정을 만들어요.</p></div><div class="ld-card"><div class="ld-num">2</div><h3>프로젝트 만들고 초대</h3><p>프로젝트를 만들고 팀원을 초대해요.</p></div><div class="ld-card"><div class="ld-num">3</div><h3>나누고, 함께 진행</h3><p>할 일을 나누고 진행 상황을 함께 확인해요.</p></div></div></div></section><section class="ld-end ld-alt"><h2>지금 바로 시작해 보세요</h2><button class="ld-b1" onclick="enterAuthFromLanding()">시작하기</button><button class="ld-lk" onclick="enterAuthFromLanding()">이미 계정이 있어요</button><div class="ld-foot">Team Plus · 졸업 프로젝트 · <a href="#" onclick="showHelpModal();return false" style="color:inherit;text-decoration:underline">도움말</a> · <a href="#" onclick="showHelpModal(\'privacy\');return false" style="color:inherit;text-decoration:underline">개인정보·이용 안내</a></div></section></div>');
+  setContent('<style>.ld{font-family:inherit;color:var(--text)}.ld *{box-sizing:border-box}.ld-hero{background:linear-gradient(160deg,#6C5CE7,#5948CE);color:#fff;padding:max(56px,env(safe-area-inset-top)) 20px 64px;text-align:center}.ld-in{max-width:960px;margin:0 auto}.ld-logo{width:56px;height:56px;border-radius:18px;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;margin:0 auto 14px}.ld-brand{font-size:15px;font-weight:700;letter-spacing:.02em;opacity:.9}.ld-hero h1{font-size:clamp(30px,6vw,46px);line-height:1.2;font-weight:800;margin:18px 0 14px}.ld-hero p{max-width:560px;margin:0 auto;font-size:16px;line-height:1.65;opacity:.92;word-break:keep-all}.ld-btns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:28px}.ld-b1{background:#fff;color:#6C5CE7;font-weight:700;border:0;border-radius:12px;padding:13px 26px;font-size:16px;cursor:pointer;min-height:48px}.ld-b2{background:rgba(255,255,255,.14);color:#fff;font-weight:600;border:1px solid rgba(255,255,255,.4);border-radius:12px;padding:13px 22px;font-size:16px;cursor:pointer;min-height:48px}.ld-sec{padding:48px 20px}.ld-sec h2{font-size:24px;font-weight:800;text-align:center;margin:0 0 24px}.ld-alt{background:var(--surface-2)}.ld-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}.ld-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;min-width:0}.ld-card h3{font-size:16px;font-weight:700;margin:12px 0 6px}.ld-card p{font-size:14px;line-height:1.6;color:var(--text-2);margin:0;word-break:keep-all}.ld-ic{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:rgba(108,92,231,.12);color:#6C5CE7}.ld-pain{display:flex;gap:10px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px 16px;font-size:15px;font-weight:600}.ld-num{width:34px;height:34px;border-radius:50%;background:linear-gradient(160deg,#6C5CE7,#5948CE);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center}.ld-end{text-align:center;padding:48px 20px calc(48px + env(safe-area-inset-bottom))}.ld-end h2{font-size:24px;font-weight:800;margin:0 0 20px}.ld-end .ld-b1{background:linear-gradient(160deg,#6C5CE7,#5948CE);color:#fff}.ld-lk{display:block;margin:14px auto 0;background:none;border:0;color:var(--text-2);font-size:14px;text-decoration:underline;cursor:pointer;padding:8px}.ld-foot{font-size:12px;color:var(--text-3);margin-top:28px}</style><div class="ld"><section class="ld-hero"><div class="ld-in"><div class="ld-logo">'+icon('zap','w-7 h-7')+'</div><div class="ld-brand">Syncspace</div><h1>팀 프로젝트,<br>한 곳에서 끝내세요</h1><p>Syncspace는 할 일, 일정, 역할, 소통을 한 곳에 모아 팀원 모두가 같은 화면을 보며 일할 수 있게 해주는 팀 프로젝트 협업 플랫폼입니다.</p><div class="ld-btns"><button class="ld-b1" onclick="enterAuthFromLanding()">시작하기</button><button class="ld-b2" onclick="startGuestMode()">게스트로 둘러보기</button><button class="ld-b2" onclick="document.getElementById(\'ld-feat\').scrollIntoView({behavior:\'smooth\'})">서비스 알아보기</button></div></div></section><section class="ld-sec"><div class="ld-in" style="max-width:640px"><h2>이런 불편, 겪어보셨나요?</h2><div style="display:grid;gap:10px"><div class="ld-pain">'+icon('help-circle','w-5 h-5')+'<span>누가 무엇을 맡았는지 헷갈려요</span></div><div class="ld-pain">'+icon('calendar-x','w-5 h-5')+'<span>일정과 마감이 여기저기 흩어져 있어요</span></div><div class="ld-pain">'+icon('eye-off','w-5 h-5')+'<span>전체 진행 상황을 한눈에 보기 어려워요</span></div></div></div></section><section class="ld-sec ld-alt" id="ld-feat"><div class="ld-in"><h2>Syncspace가 해결해요</h2><div class="ld-grid"><div class="ld-card"><div class="ld-ic">'+icon('columns-3','w-5 h-5')+'</div><h3>할 일 목록</h3><p>할 일을 만들고 담당자를 정해 “할 일 · 진행 중 · 완료”로 관리해요.</p></div><div class="ld-card"><div class="ld-ic">'+icon('calendar','w-5 h-5')+'</div><h3>캘린더</h3><p>마감일과 팀 일정을 달력에서 한눈에 확인해요.</p></div><div class="ld-card"><div class="ld-ic">'+icon('gauge','w-5 h-5')+'</div><h3>파트별 진행률</h3><p>맡은 파트별로 어디까지 진행됐는지 비교해 볼 수 있어요.</p></div><div class="ld-card"><div class="ld-ic">'+icon('message-square','w-5 h-5')+'</div><h3>팀 채팅</h3><p>프로젝트 안에서 바로 대화하고 알림도 받아요.</p></div><div class="ld-card"><div class="ld-ic">'+icon('user-plus','w-5 h-5')+'</div><h3>팀원 초대</h3><p>링크나 QR 코드로 팀원을 간편하게 초대해요.</p></div><div class="ld-card"><div class="ld-ic">'+icon('smartphone','w-5 h-5')+'</div><h3>모바일 지원</h3><p>스마트폰에서도 같은 화면으로 편하게 사용해요.</p></div></div></div></section><section class="ld-sec"><div class="ld-in"><h2>이렇게 사용해요</h2><div class="ld-grid"><div class="ld-card"><div class="ld-num">1</div><h3>가입하고 로그인</h3><p>이메일로 간단히 계정을 만들어요.</p></div><div class="ld-card"><div class="ld-num">2</div><h3>프로젝트 만들고 초대</h3><p>프로젝트를 만들고 팀원을 초대해요.</p></div><div class="ld-card"><div class="ld-num">3</div><h3>나누고, 함께 진행</h3><p>할 일을 나누고 진행 상황을 함께 확인해요.</p></div></div></div></section><section class="ld-end ld-alt"><h2>지금 바로 시작해 보세요</h2><button class="ld-b1" onclick="enterAuthFromLanding()">시작하기</button><button class="ld-lk" onclick="enterAuthFromLanding()">이미 계정이 있어요</button><div class="ld-foot">Team Plus · 졸업 프로젝트 · <a href="#" onclick="showHelpModal();return false" style="color:inherit;text-decoration:underline">도움말</a> · <a href="#" onclick="showHelpModal(\'privacy\');return false" style="color:inherit;text-decoration:underline">개인정보·이용 안내</a></div></section></div>');
 }
 function enterAuthFromLanding(){ landingShown=true; showAuthScreen(); }
 
@@ -484,7 +534,7 @@ function enterAuthFromLanding(){ landingShown=true; showAuthScreen(); }
 function showAuthScreen(){
   document.getElementById('sidebar').style.display='none'; setAuthLayout(true);
   setContent(
-  '<div class="min-h-screen flex items-center justify-center p-4" style="background:linear-gradient(160deg,#4F46E5,#7C3AED)">'
+  '<div class="min-h-screen flex items-center justify-center p-4" style="background:linear-gradient(160deg,#6C5CE7,#5948CE)">'
     +'<div class="w-full max-w-[400px] card card-pad" style="background:var(--surface)">'
       +'<div class="text-center mb-7">'
         +'<div class="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4 text-white icon-tile-brand">'+icon('zap','w-6 h-6')+'</div>'
@@ -499,6 +549,7 @@ function showAuthScreen(){
         +'<div class="relative py-3 text-center"><div class="absolute inset-0 flex items-center"><div class="w-full border-t" style="border-color:var(--border)"></div></div><span class="relative px-3 text-meta" style="background:var(--surface)">또는</span></div>'
         +'<button onclick="showSignUpForm()" class="btn-secondary w-full">'+icon('user-plus','w-4 h-4')+t('signup')+'</button>'
       +'</div>'
+      +'<button onclick="startGuestMode()" class="btn-ghost w-full mt-3">'+icon('eye','w-4 h-4')+'게스트로 둘러보기 (로그인 없이)</button>'
       +'<button onclick="showLandingScreen()" class="w-full text-center text-meta mt-4 hover:underline" style="background:none;border:none;cursor:pointer">서비스 소개 보기</button>'
       +'<div class="text-center text-meta mt-1"><button onclick="showHelpModal()" class="hover:underline" style="background:none;border:none;cursor:pointer">도움말</button> · <button onclick="showHelpModal(\'privacy\')" class="hover:underline" style="background:none;border:none;cursor:pointer">개인정보·이용 안내</button></div>'
     +'</div></div>'
@@ -510,6 +561,7 @@ function showSignUpForm(){
     +'<div><label class="field-label">이름 <span style="color:var(--danger)">*</span></label><input type="text" id="auth-name" placeholder="홍길동" class="input"></div>'
     +'<div><label class="field-label">이메일 <span style="color:var(--danger)">*</span></label><input type="email" id="auth-email" placeholder="you@example.com" class="input"></div>'
     +'<div><label class="field-label">비밀번호 (6자 이상) <span style="color:var(--danger)">*</span></label><input type="password" id="auth-pw" placeholder="6자 이상" class="input"></div>'
+    +'<div><label class="field-label">비밀번호 확인 <span style="color:var(--danger)">*</span></label><input type="password" id="auth-pw2" placeholder="비밀번호를 한 번 더 입력" class="input"></div>'
     +'<button onclick="doSignUp()" class="btn-primary w-full mt-1">'+icon('sparkles','w-4 h-4')+'가입하기</button>'
     +'<button onclick="showAuthScreen()" class="btn-ghost w-full">'+icon('arrow-left','w-4 h-4')+'로그인으로</button>'
     +'</div>';
@@ -556,13 +608,15 @@ async function doLogin(){
 }
 async function doSignUp(){
   var n=document.getElementById('auth-name').value.trim(), e=document.getElementById('auth-email').value.trim(), p=document.getElementById('auth-pw').value;
-  ['auth-name','auth-email','auth-pw'].forEach(ssClearFieldError);
+  ['auth-name','auth-email','auth-pw','auth-pw2'].forEach(ssClearFieldError);
+  var p2El=document.getElementById('auth-pw2'), p2=p2El?p2El.value:p;
   var bad=null;
   if(!n){ ssFieldError('auth-name','이름을 입력해 주세요'); bad=bad||'auth-name'; }
   if(!e){ ssFieldError('auth-email','이메일을 입력해 주세요'); bad=bad||'auth-email'; }
   else if(!ssIsEmail(e)){ ssFieldError('auth-email','이메일 형식이 올바르지 않습니다 (예: you@example.com)'); bad=bad||'auth-email'; }
   if(!p){ ssFieldError('auth-pw','비밀번호를 입력해 주세요'); bad=bad||'auth-pw'; }
   else if(p.length<6){ ssFieldError('auth-pw','비밀번호는 6자 이상이어야 합니다'); bad=bad||'auth-pw'; }
+  else if(p2!==p){ ssFieldError('auth-pw2',p2?'비밀번호가 서로 달라요. 다시 확인해 주세요':'비밀번호를 한 번 더 입력해 주세요'); bad=bad||'auth-pw2'; }
   if(bad){ document.getElementById(bad).focus(); return; }
   showLoading();
   var r=await ssSignUp(e,p,n);
@@ -598,6 +652,7 @@ window.addEventListener('popstate',function(ev){
   _popNav=true;
   try{ showView(st.v); } finally { _popNav=false; }
 });
+var SS_VIEW_LABELS={dashboard:'대시보드',mytasks:'내 작업',notifications:'알림',kanban:'할 일 목록',calendar:'캘린더',roles:'파트별 진행률',team:'팀 멤버',chat:'팀 채팅',profile:'프로필',help:'도움말',archive:'보관함',templates:'템플릿'};
 function showView(view){
   if(view!=='chat') stopChatListener();   // 채팅 화면을 벗어나면 실시간 수신 해제
   if(view==='todos') view='kanban'; // 예전에 저장된 설정/링크에 남아 있을 수 있는 목록 화면 → 할 일 목록(칸반)으로 연결
@@ -607,6 +662,7 @@ function showView(view){
     return;
   }
   currentView=view;
+  var cv=document.getElementById('crumb-view'); if(cv) cv.textContent=SS_VIEW_LABELS[view]||'대시보드';
   ssPushViewState(view);
   closeDrawer();
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
@@ -623,6 +679,7 @@ function showView(view){
     case 'notifications': renderNotifications(); break;
     case 'profile': renderProfile(); break;
     case 'templates': renderTemplates(); break;
+    case 'help': renderHelp(); break;
     default: renderDashboard();
   }
 }
@@ -640,8 +697,11 @@ function updateProjectChrome(){
   var name = currentProject ? currentProject.name : 'Syncspace';
   var el=document.getElementById('current-project-name'); if(el) el.textContent=name;
   var mEl=document.getElementById('mobile-project-name'); if(mEl) mEl.textContent=name;
+  var ini=document.getElementById('current-project-initial'); if(ini) ini.textContent=(name||'S').charAt(0).toUpperCase();
+  var cp=document.getElementById('crumb-project'); if(cp) cp.textContent=name;
   var sEl=document.getElementById('scope-project-name'); if(sEl) sEl.textContent = currentProject ? (' · '+currentProject.name) : '';
   document.querySelectorAll('.scoped-nav').forEach(b=>{ if(currentProjectId) b.classList.remove('nav-disabled'); else b.classList.add('nav-disabled'); });
+  syncChatUnreadListener();
 }
 
 /* ================= 프로젝트 스위처 ================= */
@@ -699,9 +759,11 @@ function roleBadge(role){
   if(role==='viewer') return '<span class="badge-neutral">'+icon('eye','w-3 h-3')+'뷰어</span>';
   return '<span class="badge-success">'+icon('pencil','w-3 h-3')+'편집자</span>';
 }
+var SS_EYEBROW={mytasks:'MY WORK',kanban:'TASKS',calendar:'CALENDAR',roles:'PROGRESS',team:'TEAM',notifications:'INBOX',profile:'SETTINGS',help:'HELP CENTER',archive:'ARCHIVE',templates:'TEMPLATES'};
 function pageHeader(title,subtitle,actionsHtml){
+  var eb=SS_EYEBROW[currentView];
   return '<div class="px-6 pt-6 pb-5 flex items-start justify-between gap-4 flex-wrap">'
-    +'<div><h1 class="text-page-title">'+title+'</h1>'+(subtitle?'<p class="text-body mt-1">'+subtitle+'</p>':'')+'</div>'
+    +'<div>'+(eb?'<div class="ss-eyebrow" translate="no">'+eb+'</div>':'')+'<h1 class="text-page-title">'+title+'</h1>'+(subtitle?'<p class="text-body mt-1">'+subtitle+'</p>':'')+'</div>'
     +(actionsHtml?'<div class="flex items-center gap-2 flex-wrap">'+actionsHtml+'</div>':'')
   +'</div>';
 }
@@ -752,20 +814,23 @@ async function renderDashboard(){
 
     kpiHtml = '<div class="grid grid-cols-2 md:grid-cols-4 gap-4 px-6">'
       + kpiCard('list-todo','전체 작업',total,'프로젝트 내 총 작업 수','var(--primary)','var(--primary-soft)')
-      + kpiCard('loader','진행 중',inprogress,'현재 작업 중인 항목','var(--warning)','var(--warning-soft)')
-      + kpiCard('check-circle-2','완료',done,pct+'% 완료율','var(--success)','var(--success-soft)')
+      + kpiCard('loader','진행 중',inprogress,'현재 작업 중인 항목','var(--warning)','var(--warning-soft)',total?Math.round(inprogress/total*100):0)
+      + kpiCard('check-circle-2','완료',done,pct+'% 완료율','var(--success)','var(--success-soft)',pct)
       + kpiCard('alarm-clock','마감 임박',dueSoon.length, overdue.length>0?(overdue.length+'개 지연됨'):'7일 이내 마감', overdue.length>0?'var(--danger)':'var(--info)', overdue.length>0?'var(--danger-soft)':'var(--info-soft)')
       + '</div>';
 
-    var progressCard = '<div class="card card-pad">'
-      + '<div class="flex items-center justify-between mb-4"><h3 class="text-section-title">프로젝트 진행률</h3><span class="badge-primary">'+escUser(currentProject.name)+'</span></div>'
-      + '<div class="flex items-end gap-3 mb-2"><span class="text-[32px] font-extrabold leading-none" style="color:var(--text)">'+pct+'%</span><span class="text-meta mb-1">완료됨</span></div>'
-      + '<div class="progress-track h-2.5 mb-5"><div class="progress-fill" style="width:'+pct+'%"></div></div>'
-      + '<div class="grid grid-cols-3 gap-2 text-center">'
-        + '<div class="surface-2 rounded-xl py-3"><div class="text-[18px] font-bold" style="color:var(--text)">'+done+'</div><div class="text-meta mt-0.5">완료</div></div>'
-        + '<div class="surface-2 rounded-xl py-3"><div class="text-[18px] font-bold" style="color:var(--text)">'+inprogress+'</div><div class="text-meta mt-0.5">진행 중</div></div>'
-        + '<div class="surface-2 rounded-xl py-3"><div class="text-[18px] font-bold" style="color:var(--text)">'+todo+'</div><div class="text-meta mt-0.5">할 일</div></div>'
-      + '</div></div>';
+    var progressCard = '<div class="card ss-active ss-span-3">'
+      + '<span class="ss-active-tile">'+(currentProject.icon?escHtml(currentProject.icon):icon('sparkles','w-6 h-6'))+'</span>'
+      + '<div class="ss-active-info"><div class="ss-eyebrow" translate="no">ACTIVE PROJECT</div>'
+        + '<div class="ss-active-name truncate">'+escUser(currentProject.name)+'</div>'
+        + '<div class="text-meta truncate">'+escHtml((currentProject.description||'').trim()||'프로젝트 설명을 추가해 보세요')+'</div></div>'
+      + '<div class="ss-active-bar"><div class="flex items-center justify-between mb-1.5"><span class="text-meta">전체 진행률</span><b style="color:var(--primary);font-size:12px">'+pct+'%</b></div>'
+        + '<div class="progress-track h-2"><div class="progress-fill" style="width:'+pct+'%"></div></div>'
+        + '<div class="flex items-center justify-between mt-1.5 text-meta"><span>'+total+'개 중 '+done+'개 완료</span><span>'+overdue.length+'개 지연</span></div></div>'
+      + '<div class="ss-active-stats">'
+        + '<div><b>'+inprogress+'</b><span>진행 중</span></div><div><b>'+todo+'</b><span>할 일</span></div><div><b>'+done+'</b><span>완료</span></div></div>'
+      + '<button onclick="showView(\'kanban\')" class="ss-round-btn" aria-label="할 일 목록 열기">'+icon('chevron-right','w-4 h-4')+'</button>'
+      + '</div>';
 
     // 파트별(역할별) 진행률 — 멤버가 직접 입력한 값 요약. 상세/입력은 '파트별 진행률' 화면
     var dMembersR=await ssGetProjectMembers(currentProjectId);
@@ -781,7 +846,7 @@ async function renderDashboard(){
               +'<div class="flex items-center justify-between mb-1.5">'
                 +'<span class="flex items-center gap-2 text-body font-semibold" style="color:var(--text)"><span style="width:8px;height:8px;border-radius:50%;background:'+r.color+'"></span>'+r.label
                   +(r.total?' <span class="text-meta font-normal">'+r.members.map(m=>escHtml(m.name)).join(', ')+'</span>':'')+'</span>'
-                +'<span class="text-meta"><b style="color:'+(r.total?r.color:'var(--text-3)')+';font-size:13px">'+r.percent+'%</b>'+(r.total?' · 완료 '+r.doneCount+'/'+r.total+'명':'')+'</span>'
+                +'<span class="text-meta"><b style="color:var(--text);font-size:13px">'+r.percent+'%</b>'+(r.total?' · 완료 '+r.doneCount+'/'+r.total+'명':'')+'</span>'
               +'</div>'
               +'<div class="progress-track h-2"><div class="progress-fill" style="width:'+r.percent+'%;background:'+r.color+'"></div></div>'
             +'</div>';
@@ -792,7 +857,7 @@ async function renderDashboard(){
     // 프로젝트 설명 카드 — 높이를 2줄로 고정하고 넘치면 '전체 보기'로 확인(설명이 길어도 아래 카드가 밀리지 않음)
     var projDesc=(currentProject.description||'').trim();
     var isOwnerHere=getMyRole(currentProject)==='owner';
-    var descCard = (projDesc || isOwnerHere) ? '<div class="card card-pad lg:col-span-2">'
+    var descCard = (projDesc || isOwnerHere) ? '<div class="card card-pad ss-span-3" style="align-self:start">'
       + '<div class="flex items-center justify-between gap-3 mb-1.5"><h3 class="text-section-title">프로젝트 설명</h3>'
         + '<div class="flex items-center gap-3">'
           + ((projDesc.length>110||projDesc.indexOf('\n')!==-1)?'<button onclick="showProjectDescModal()" class="text-[12px] font-semibold" style="color:var(--primary)">전체 보기</button>':'')
@@ -804,34 +869,51 @@ async function renderDashboard(){
           : '<p class="text-meta">아직 프로젝트 설명이 없어요. 팀원들이 프로젝트를 이해할 수 있게 간단히 적어보세요.</p>')
       + '</div>' : '';
 
-    var upcoming = tasks.filter(t=>t.dueDate&&t.status!=='done').sort((a,b)=>(a.dueDate||'').localeCompare(b.dueDate||'')).slice(0,5);
-    var upcomingCard = '<div class="card card-pad">'
-      + '<div class="flex items-center justify-between mb-3"><h3 class="text-section-title">마감 임박 작업</h3><button onclick="showView(\'kanban\')" class="text-[12px] font-semibold" style="color:var(--primary)">전체 보기</button></div>'
-      + (upcoming.length? '<div class="divide-hair -mx-1">'+upcoming.map(t=>{
-          var isOverdue = new Date(t.dueDate)<today;
-          return '<div class="flex items-center gap-3 px-1 py-2.5 cursor-pointer hover:opacity-80" onclick="showTaskDetail(\''+t.id+'\')">'
-            +'<div class="w-1.5 h-1.5 rounded-full shrink-0" style="background:'+(isOverdue?'var(--danger)':'var(--primary)')+'"></div>'
-            +'<div class="min-w-0 flex-1"><div class="text-card-title truncate">'+escUser(t.title)+'</div>'
-            +'<div class="text-meta mt-0.5">'+(t.assigneeName?t.assigneeName+' · ':'')+t.dueDate+'</div></div>'
-            + priorityBadge(t.priority)
+    var myList = tasks.filter(t=>t.assigneeId===currentUser.uid);
+    var myOpen = myList.filter(t=>t.status!=='done').sort((x,y)=>(x.dueDate||'9999').localeCompare(y.dueDate||'9999'));
+    var myDone = myList.filter(t=>t.status==='done');
+    var myShow = myOpen.concat(myDone).slice(0,5);
+    function dueChip(t){
+      if(t.status==='done') return '<span class="ss-due">'+icon('check','w-3 h-3')+'완료</span>';
+      if(!t.dueDate) return '<span class="ss-due">마감 없음</span>';
+      var dd=new Date(t.dueDate); dd.setHours(0,0,0,0); var diff=Math.round((dd-today)/86400000);
+      var label = diff===0?'오늘':diff===1?'내일':diff<0?(-diff)+'일 지연':(dd.getMonth()+1)+'월 '+dd.getDate()+'일';
+      return '<span class="ss-due'+(diff<0?' late':diff===0?' today':'')+'">'+icon('calendar','w-3 h-3')+label+'</span>';
+    }
+    var upcomingCard = '<div class="card ss-panel lg:col-span-2">'
+      + '<div class="ss-panel-head"><div><h3 class="text-section-title">내 작업</h3><p class="text-meta mt-0.5">우선순위가 높은 작업부터 확인하세요.</p></div>'
+        + '<button onclick="showView(\'mytasks\')" class="ss-link">모두 보기'+icon('chevron-right','w-3.5 h-3.5')+'</button></div>'
+      + (myShow.length ? '<div>'+myShow.map(function(t){
+          var isDone=t.status==='done';
+          return '<div class="ss-task-row" onclick="showTaskDetail(\''+t.id+'\')">'
+            + '<button type="button" class="ss-check'+(isDone?' on':'')+'" onclick="event.stopPropagation();doToggleTaskDone(\''+t.id+'\',\''+t.status+'\')" aria-label="'+(isDone?'완료 취소':'완료 처리')+'">'+(isDone?icon('check','w-3 h-3'):'')+'</button>'
+            + '<div class="min-w-0 flex-1"><div class="ss-task-title truncate'+(isDone?' done':'')+'">'+escUser(t.title)+'</div><div class="text-meta truncate">'+escHtml(currentProject.name)+'</div></div>'
+            + priorityBadge(t.priority) + dueChip(t)
+            + '<span class="ss-mini-av" translate="no">'+escHtml(Array.from((t.assigneeName||currentUser.name||'?').toString())[0])+'</span>'
           +'</div>';
         }).join('')+'</div>'
-        : emptyState('calendar-check','마감 임박 작업 없음','마감일이 설정된 작업이 없습니다.','<button onclick="showAddTaskModal()" class="btn-secondary">'+icon('plus','w-4 h-4')+'마감일 있는 작업 추가</button>'))
+        : '<div class="p-4">'+emptyState('user-check','나에게 할당된 작업이 없어요','작업을 만들고 담당자를 지정해 보세요.','<button onclick="showAddTaskModal()" class="btn-secondary">'+icon('plus','w-4 h-4')+'새 작업</button>')+'</div>')
+      + '<button onclick="showAddTaskModal()" class="ss-add-row">'+icon('plus','w-4 h-4')+'새 작업 추가</button>'
       + '</div>';
 
     var eventsR = await ssGetEvents(currentProjectId);
     var todayStr = fmtDate(new Date());
     var todayEvents = (eventsR.events||[]).filter(e=>e.date===todayStr);
-    var scheduleCard = '<div class="card card-pad">'
-      + '<div class="flex items-center justify-between mb-3"><h3 class="text-section-title">오늘 일정</h3><button onclick="showView(\'calendar\')" class="text-[12px] font-semibold" style="color:var(--primary)">캘린더 보기</button></div>'
-      + (todayEvents.length? '<div class="space-y-2">'+todayEvents.map(e=>
-          '<div class="flex items-center gap-2.5 p-2.5 rounded-xl surface-2">'
-          + '<div class="w-2 h-2 rounded-full shrink-0" style="background:#'+(e.color||'6366F1')+'"></div>'
-          + '<span class="text-card-title flex-1 truncate">'+escUser(e.title)+'</span>'
-          + '<span class="text-meta">'+(e.type==='milestone'?'마일스톤':e.type==='deadline'?'마감':'일정')+'</span>'
-        +'</div>').join('')+'</div>'
+    todayEvents.sort((x,y)=>(x.time||'99:99').localeCompare(y.time||'99:99'));
+    var scheduleCard = '<div class="card ss-panel">'
+      + '<div class="ss-panel-head"><div><h3 class="text-section-title">오늘 일정</h3><p class="text-meta mt-0.5">'+todayLabel()+'</p></div>'
+        + '<button onclick="showView(\'calendar\')" class="ss-link">모두 보기'+icon('chevron-right','w-3.5 h-3.5')+'</button></div>'
+      + '<div class="p-4">'
+      + (todayEvents.length? todayEvents.slice(0,4).map(e=>
+          '<div class="ss-event">'
+          + '<span class="ss-event-time">'+escHtml(e.time||'종일')+'</span>'
+          + '<span class="ss-event-bar" style="background:#'+(e.color||'6C5CE7')+'"></span>'
+          + '<div class="min-w-0 flex-1"><div class="ss-task-title truncate">'+escUser(e.title)+'</div>'
+          + '<div class="text-meta">'+(e.type==='milestone'?'마일스톤':e.type==='deadline'?'마감':'일정')+'</div></div>'
+        +'</div>').join('')
         : emptyState('coffee','오늘은 일정이 없어요','여유로운 하루 보내세요.','<button onclick="showAddEventModal(fmtDate(new Date()))" class="btn-secondary">'+icon('calendar-plus','w-4 h-4')+'일정 추가</button>'))
-      + '</div>';
+      + '<button onclick="showView(\'calendar\')" class="ss-wide-btn">'+icon('calendar','w-4 h-4')+'전체 캘린더 보기</button>'
+      + '</div></div>';
 
     var notifR = await ssGetNotifications();
     var allNotifs = (notifR.notifications||[]).filter(n=>notifTypeAllowed(n.type));
@@ -848,8 +930,8 @@ async function renderDashboard(){
         : emptyState('inbox','새 알림이 없어요','새 소식이 도착하면 여기에 바로 표시됩니다.',''))
       + '</div>';
 
-    bodyHtml = '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 px-6 mt-4">'
-      + descCard + progressCard + upcomingCard + rolesCard + scheduleCard + activityCard
+    bodyHtml = '<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 px-6 mt-4">'
+      + upcomingCard + scheduleCard + progressCard + rolesCard + activityCard + descCard
       + '</div>';
   } else {
     kpiHtml = '<div class="px-6">'+emptyState('folder-kanban','프로젝트를 선택하세요','아래에서 프로젝트를 선택하거나 새로 만들어 시작하세요.','')+'</div>';
@@ -901,8 +983,13 @@ async function renderDashboard(){
 
   var headerActions = currentProjectId
     ? ('<button onclick="showAddEventModal(\''+fmtDate(new Date())+'\')" class="btn-secondary">'+icon('calendar-plus','w-4 h-4')+'일정 추가</button>'
-      +'<button onclick="showAddTaskModal()" class="btn-primary">'+icon('plus','w-4 h-4')+'새 작업</button>')
+      +'<button onclick="showAddTaskModal()" class="btn-primary lg:hidden">'+icon('plus','w-4 h-4')+'새 작업</button>')
     : '';
+  // 팀원 아바타 줄(Figma: "팀원 N명이 함께하고 있어요")
+  if(currentProjectId && typeof dMembersR!=='undefined' && dMembersR && (dMembersR.members||[]).length){
+    var tms=dMembersR.members;
+    headerActions='<div class="ss-team">'+tms.slice(0,4).map(function(m){ return '<span class="ss-team-av" translate="no">'+escHtml(Array.from((m.avatar||m.name||'?').toString())[0])+'</span>'; }).join('')+(tms.length>4?'<span class="ss-team-av">+'+(tms.length-4)+'</span>':'')+'<span class="text-meta ml-2">팀원 '+tms.length+'명이 함께하고 있어요</span></div>'+headerActions;
+  }
 
   var onboardingHtml = renderOnboardingCard() + renderNextStepsCard();
 
@@ -913,16 +1000,77 @@ async function renderDashboard(){
   );
 }
 
-function kpiCard(iconName,label,value,sub,color,soft){
+function kpiCard(iconName,label,value,sub,color,soft,bar){
   return '<div class="card card-pad">'
-    +'<div class="flex items-center justify-between mb-3"><div class="kpi-icon" style="background:linear-gradient(160deg, var(--surface) -30%, '+soft+' 130%)">'+icon(iconName,'w-[18px] h-[18px]').replace('<i ','<i style="color:'+color+'" ')+'</div></div>'
-    +'<div class="text-[24px] font-extrabold leading-none" style="color:var(--text)">'+value+'</div>'
-    +'<div class="text-card-title mt-1.5">'+label+'</div>'
-    +'<div class="text-meta mt-0.5">'+sub+'</div>'
+    +'<div class="flex items-center gap-2.5 mb-3"><div class="kpi-icon" style="background:linear-gradient(160deg, var(--surface) -30%, '+soft+' 130%)">'+icon(iconName,'w-[18px] h-[18px]').replace('<i ','<i style="color:'+color+'" ')+'</div><div class="text-card-title">'+label+'</div></div>'
+    +'<div class="text-[28px] font-extrabold leading-none" style="color:var(--text)">'+value+'</div>'
+    +(typeof bar==='number'?'<div class="progress-track h-1.5 mt-3"><div class="progress-fill" style="width:'+Math.max(0,Math.min(100,bar))+'%;background:'+color+'"></div></div>':'')
+    +'<div class="text-meta mt-2">'+sub+'</div>'
   +'</div>';
 }
 
 /* ================= 프로젝트 생성/수정 모달 ================= */
+/* ================= 예시(데모) 프로젝트 =================
+   피그마 시안처럼 채워진 화면을 보고 싶을 때 쓰는 '내 계정 전용' 예시 프로젝트.
+   - 프로젝트 이름 끝에 (예시)가 붙고, 프로젝트 설정 > 삭제로 언제든 지울 수 있다.
+   - 가상의 팀원(이준호·박서연·최도윤·정하늘)은 실제 계정이 아니라 이름만 있는 데이터다. */
+var demoCreating=false;
+async function doCreateDemoProject(){
+  if(demoCreating) return;
+  if(!currentUser){ showToast('먼저 로그인해 주세요','error'); return; }
+  if(!confirm('내 계정에 "모바일 앱 리뉴얼 (예시)" 프로젝트를 만들까요?\n예시 작업·일정·채팅이 채워지고, 프로젝트 설정에서 삭제하면 모두 사라져요.')) return;
+  demoCreating=true; showLoading();
+  try{
+    var r=await ssCreateProject({name:'모바일 앱 리뉴얼 (예시)',description:'더 직관적이고 편리한 모바일 경험을 만들고 있어요. 화면 구성을 확인하기 위한 예시 프로젝트예요.',color:'6C5CE7',icon:'✨'});
+    if(!r.success) throw new Error(r.error||'프로젝트를 만들지 못했어요');
+    var pid=r.id, uid=currentUser.uid, me=currentUser.name||'나';
+    function day(n){ var d=new Date(); d.setDate(d.getDate()+n); return fmtDate(d); }
+    var P={ seoyeon:['demo-seoyeon','박서연'], junho:['demo-junho','이준호'], doyun:['demo-doyun','최도윤'], haneul:['demo-haneul','정하늘'], me:[uid,me] };
+    var tasks=[
+      ['사용자 인터뷰 인사이트 정리','todo','high',0,'me','핵심 발견점과 개선 제안을 정리해요.'],
+      ['홈 화면 와이어프레임 검토','todo','medium',1,'me','리뷰 전에 피드백을 모아요.'],
+      ['브랜드 가이드 최종본 공유','inprogress','low',4,'seoyeon',''],
+      ['주간 스프린트 회고 작성','done','medium',-1,'me',''],
+      ['API 명세 공유','inprogress','high',1,'doyun',''],
+      ['캘린더 월간 화면 QA','inprogress','medium',3,'me',''],
+      ['로그인 화면 구현','done','high',-2,'junho',''],
+      ['디자인 시스템 컬러 토큰 정리','todo','low',7,'seoyeon',''],
+      ['발표 자료 초안 작성','todo','medium',6,'me',''],
+      ['푸시 알림 문구 검토','todo','medium',5,'doyun',''],
+      ['브랜드 이미지 에셋 정리','done','low',-3,'haneul',''],
+      ['온보딩 화면 프로토타입','inprogress','high',2,'junho','']
+    ];
+    var base=Date.now();
+    for(var i=0;i<tasks.length;i++){
+      var t=tasks[i], who=P[t[4]];
+      await db.collection('tasks').add({
+        projectId:pid, title:t[0], description:t[5], status:t[1], priority:t[2],
+        assigneeId:who[0], assigneeName:who[1], dueDate:day(t[3]), tags:[], checklist:[], comments:0,
+        files:[], repeatType:'none', repeatEndDate:null, creatorId:uid, order:base+i,
+        createdAt:firebase.firestore.FieldValue.serverTimestamp(), updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+    var ev=[['제품팀 데일리 스탠드업',0,'10:00','event','6C5CE7'],['디자인 리뷰',0,'14:00','event','60A5FA'],['개발팀 핸드오프',0,'16:30','deadline','F59E0B'],
+            ['스프린트 회고',2,'11:00','event','6C5CE7'],['중간 발표 리허설',5,'15:00','milestone','F59E0B'],['최종 발표',9,'','milestone','FF6F61']];
+    for(var j=0;j<ev.length;j++){ await ssCreateEvent(pid,{title:ev[j][0],date:day(ev[j][1]),time:ev[j][2],type:ev[j][3],color:ev[j][4]}); }
+    var chat=[['seoyeon','🧑‍🎨','오늘 디자인 리뷰 전에 사용자 인터뷰 인사이트를 먼저 공유해 주실 수 있을까요?',95],
+              ['me',currentUser.avatar||'😀','네, 주요 발견점과 개선 제안을 정리해서 11시 전까지 올려둘게요.',90],
+              ['junho','🧑‍💻','홈 화면 프로토타입도 업데이트했습니다. 리뷰할 때 인터랙션 부분 같이 확인 부탁드려요.',60],
+              ['doyun','👨‍💻','API 명세 관련 변경 사항은 개발 채널에 정리해 두었습니다.',20]];
+    for(var k=0;k<chat.length;k++){
+      var c=chat[k], w=P[c[0]];
+      await db.collection('projects').doc(pid).collection('chat').add({content:c[2],authorId:w[0],authorName:w[1],authorAvatar:c[1],
+        createdAt:firebase.firestore.Timestamp.fromDate(new Date(Date.now()-c[3]*60000))});
+    }
+    await ssSetMyProgress(pid,{role:'frontend',percent:70});
+    await ssUpdateProject(pid,{progress:64});
+    hideLoading(); closeModal(); demoCreating=false;
+    await loadProjects(); await selectProject(pid); showView('dashboard');
+    showToast('예시 프로젝트를 만들었어요 ✨','success');
+  }catch(e){
+    hideLoading(); demoCreating=false; showToast('예시 프로젝트를 만들지 못했어요: '+(e.message||e),'error');
+  }
+}
 function showCreateProjectModal(){
   showModal(modalWrap('새 프로젝트',
     '<div class="space-y-3">'
@@ -930,7 +1078,7 @@ function showCreateProjectModal(){
     +'<div><label class="field-label">설명</label><textarea id="proj-desc" data-enter-submit="1" placeholder="프로젝트에 대한 간단한 설명 (Enter: 생성 · Shift+Enter: 줄바꿈)" class="input" rows="3"></textarea></div>'
     +'<div><label class="field-label">색상</label><input type="color" id="proj-color" value="#6366F1" class="w-full h-10 rounded-lg border cursor-pointer" style="border-color:var(--border-strong)"></div>'
     +'</div>',
-    '<button onclick="closeModal()" class="btn-secondary">취소</button><button onclick="doCreateProject()" class="btn-primary">'+icon('plus','w-4 h-4')+'생성</button>'
+    '<button onclick="doCreateDemoProject()" class="btn-ghost mr-auto" title="피그마처럼 채워진 예시 프로젝트를 만들어요">'+icon('sparkles','w-4 h-4')+'예시 프로젝트로 시작</button><button onclick="closeModal()" class="btn-secondary">취소</button><button onclick="doCreateProject()" class="btn-primary">'+icon('plus','w-4 h-4')+'생성</button>'
   ));
 }
 async function doCreateProject(){var name=document.getElementById('proj-name').value.trim(),desc=document.getElementById('proj-desc').value.trim(),color=document.getElementById('proj-color').value.substring(1);ssClearFieldError('proj-name');if(!name){ssFieldError('proj-name','프로젝트 이름을 입력해 주세요');document.getElementById('proj-name').focus();return;}showLoading();var r=await ssCreateProject({name,description:desc,icon:'📁',color});hideLoading();if(r.success){ssClearDraft('proj-name','proj-desc');closeModal();showToast('프로젝트가 생성되었습니다','success');localStorage.setItem('syncspace-onb-project','1');ssLogActivity(r.id,'project_create',(currentUser.name||'사용자')+'님이 프로젝트를 생성했습니다');await loadProjects();renderDashboard();}else showToast(r.error,'error');}
@@ -966,15 +1114,26 @@ async function doArchiveProject(projectId){
   if(r.success){ closeModal(); showToast('보관되었습니다','success'); if(currentProjectId===projectId){ currentProjectId=null; updateProjectChrome(); } await loadProjects(); renderDashboard(); }
   else showToast('실패했습니다','error');
 }
+async function doRestoreDeletedProject(projectId){
+  showLoading(); var r=await ssUpdateProject(projectId,{status:'active'}); hideLoading();
+  if(r.success){ showToast('프로젝트를 복구했습니다','success'); await loadProjects(); renderArchive(); }
+  else showToast(r.error||'복구하지 못했습니다','error');
+}
 async function renderArchive(){
-  showLoading(); var r=await ssGetArchivedProjects(); hideLoading();
+  showLoading(); var r=await ssGetArchivedProjects(); var dr=await ssGetDeletedProjects(); hideLoading();
   var projects=r.projects||[];
+  var deleted=dr.projects||[];
+  var delList=deleted.length? '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">'+deleted.map(p=>
+    '<div class="card card-pad"><div class="flex items-center gap-3 mb-3"><div class="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0" style="background:#'+p.color+'1F;border:1px solid var(--border)">'+p.icon+'</div><div class="min-w-0"><div class="text-card-title truncate">'+escUser(p.name)+'</div><div class="text-meta">삭제됨</div></div></div>'
+    +(getMyRole(p)==='owner'?'<button onclick="doRestoreDeletedProject(\''+p.id+'\')" class="btn-secondary w-full">'+icon('undo-2','w-4 h-4')+'복구하기</button>':'<div class="text-meta text-center">프로젝트 소유자만 복구할 수 있어요</div>')+'</div>'
+  ).join('')+'</div>' : '<p class="text-body">삭제한 프로젝트가 없어요.</p>';
   var list=projects.length? '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">'+projects.map(p=>
     '<div class="card card-pad"><div class="flex items-center gap-3 mb-3"><div class="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0" style="background:#'+p.color+'1F;border:1px solid var(--border)">'+p.icon+'</div><div class="min-w-0"><div class="text-card-title truncate">'+escUser(p.name)+'</div><div class="text-meta">보관됨</div></div></div>'
     +'<button onclick="doUnarchiveProject(\''+p.id+'\')" class="btn-secondary w-full">'+icon('archive-restore','w-4 h-4')+'복원하기</button></div>'
   ).join('')+'</div>' : emptyState('archive','보관된 프로젝트가 없어요','완료된 프로젝트를 삭제 대신 보관해보세요','');
-  setContent(pageHeader('보관함','완료되었거나 잠시 쉬는 프로젝트','<button onclick="showView(\'dashboard\')" class="btn-secondary">'+icon('arrow-left','w-4 h-4')+'대시보드</button>')
-    +'<div class="px-6 pb-8">'+list+'</div>');
+  setContent(pageHeader('보관함','보관하거나 삭제한 프로젝트를 다시 꺼낼 수 있어요','<button onclick="showView(\'dashboard\')" class="btn-secondary">'+icon('arrow-left','w-4 h-4')+'대시보드</button>')
+    +'<div class="px-6 pb-8">'+list
+    +'<h2 class="text-card-title mt-8 mb-3">'+icon('trash-2','w-4 h-4 inline mr-1 -mt-0.5')+'삭제한 프로젝트</h2>'+delList+'</div>');
 }
 async function doUnarchiveProject(projectId){
   showLoading(); var r=await ssUpdateProject(projectId,{status:'active'}); hideLoading();
@@ -1102,7 +1261,7 @@ function kanbanCard(t){
     +' ondragleave="this.style.borderTop=\'\'"'
     +' ondrop="onCardDrop(event,\''+t.id+'\',\''+t.status+'\')"'
     +' onclick="'+(bulkMode?'toggleBulkSelect(\''+t.id+'\','+(selectedTaskIds.indexOf(t.id)===-1)+')':'showTaskDetail(\''+t.id+'\')')+'" class="task-card mb-2.5" style="'+(bulkMode&&selectedTaskIds.indexOf(t.id)!==-1?'outline:2px solid var(--primary)':'')+'">'
-    +'<div class="flex items-start justify-between gap-2 mb-2">'+(bulkMode?'<input type="checkbox" '+(selectedTaskIds.indexOf(t.id)!==-1?'checked':'')+' tabindex="-1" class="w-[16px] h-[16px] rounded shrink-0 mt-0.5 accent-[var(--primary)]" style="pointer-events:none" aria-hidden="true">':'')+''+(bulkMode?'':'<button onclick="event.stopPropagation();doToggleTaskDone(\''+t.id+'\',\''+t.status+'\')" class="shrink-0 mt-0.5" style="color:'+(t.status==='done'?'var(--success)':'var(--text-3)')+'" title="'+(t.status==='done'?'다시 할 일로 되돌리기':'완료 처리')+'" aria-label="'+(t.status==='done'?'완료 취소':'완료 처리')+'">'+icon(t.status==='done'?'check-circle-2':'circle','w-[18px] h-[18px]')+'</button>')+'<h4 class="text-card-title leading-snug flex-1" translate="no"'+(bulkMode?'':' title="더블클릭하면 제목을 바로 수정할 수 있어요" onclick="ssTitleClick(event,\''+t.id+'\')" ondblclick="ssTitleEdit(event,\''+t.id+'\')"')+'>'+highlightMatch(escHtml(t.title),searchQuery)+'</h4>'
+    +'<div class="flex items-start justify-between gap-2 mb-2">'+(bulkMode?'<input type="checkbox" '+(selectedTaskIds.indexOf(t.id)!==-1?'checked':'')+' tabindex="-1" class="w-[16px] h-[16px] rounded shrink-0 mt-0.5 accent-[var(--primary)]" style="pointer-events:none" aria-hidden="true">':'')+''+(bulkMode?'':'<button onclick="event.stopPropagation();doToggleTaskDone(\''+t.id+'\',\''+t.status+'\')" class="shrink-0 mt-0.5 ss-hit" style="color:'+(t.status==='done'?'var(--success)':'var(--text-3)')+'" title="'+(t.status==='done'?'다시 할 일로 되돌리기':'완료 처리')+'" aria-label="'+(t.status==='done'?'완료 취소':'완료 처리')+'">'+icon(t.status==='done'?'check-circle-2':'circle','w-[18px] h-[18px]')+'</button>')+'<h4 class="text-card-title leading-snug flex-1" translate="no"'+(bulkMode?'':' title="더블클릭하면 제목을 바로 수정할 수 있어요" onclick="ssTitleClick(event,\''+t.id+'\')" ondblclick="ssTitleEdit(event,\''+t.id+'\')"')+'>'+highlightMatch(escHtml(t.title),searchQuery)+'</h4>'
       +'<div class="flex items-center gap-0.5 shrink-0">'
       +(starred?icon('star','w-3.5 h-3.5').replace('class="','style="color:var(--warning)" class="'):'')
       +'<button onclick="event.stopPropagation();showQuickStatusMenu(\''+t.id+'\',\''+t.status+'\')" class="icon-btn w-6 h-6" title="상태 빠르게 변경 (모바일에서 드래그 대신 사용)" aria-label="상태 빠르게 변경">'+icon('more-vertical','w-3.5 h-3.5')+'</button>'
@@ -1367,11 +1526,13 @@ async function loadTaskDetail(taskId){
       +(files.length? '<div class="space-y-1.5 mb-3">'+files.map(f=>
         '<div class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg surface-2"><a href="'+(f.url||'#')+'" target="_blank" class="text-body flex-1 truncate hover:underline">'+icon('file','w-3.5 h-3.5 inline mr-1 -mt-0.5')+escHtml(f.name)+'</a><button onclick="doDeleteTaskFileUI(\''+taskId+'\',\''+f.id+'\')" class="icon-btn w-6 h-6" aria-label="파일 삭제">'+icon('trash-2','w-3 h-3')+'</button></div>'
       ).join('')+'</div>' : '')
+      +(FILE_UPLOAD_ENABLED?(''
       +'<div id="dropzone-'+taskId+'" ondragover="event.preventDefault();this.style.borderColor=\'var(--primary)\'" ondragleave="this.style.borderColor=\'var(--border-strong)\'" ondrop="doDropTaskFile(event,\''+taskId+'\')" class="rounded-xl border-2 border-dashed p-4 text-center cursor-pointer" style="border-color:var(--border-strong)" onclick="document.getElementById(\'file-input-\'+\''+taskId+'\').click()">'
         +icon('upload-cloud','w-5 h-5 mx-auto mb-1').replace('class="','style="color:var(--text-3)" class="')
         +'<div class="text-meta">클릭하거나 파일을 끌어다 놓으세요</div>'
         +'<input type="file" id="file-input-'+taskId+'" class="hidden" onchange="doUploadTaskFileUI(event,\''+taskId+'\')">'
       +'</div>'
+      ):'<div class="rounded-xl p-4 text-center" style="background:var(--surface-2);border:1px dashed var(--border-strong)">'+icon('cloud-off','w-5 h-5 mx-auto mb-1').replace('class="','style="color:var(--text-3)" class="')+'<div class="text-card-title">파일 첨부는 준비 중이에요</div><div class="text-meta mt-0.5">지금은 댓글에 링크를 붙여 공유해 주세요.</div></div>')
     +'</div>'
 
     // ---- 활동 탭 (#8) ----
@@ -1507,8 +1668,8 @@ async function doAddChecklistItemUI(taskId){ var inp=document.getElementById('ch
 async function doToggleChecklistUI(taskId,index,checked){ var r=await ssToggleChecklist(taskId,index,checked); if(r.success) loadTaskDetail(taskId); }
 async function doRemoveChecklistItemUI(taskId,index){ var r=await ssRemoveChecklistItem(taskId,index); if(r.success) loadTaskDetail(taskId); }
 /* ---- #7 파일 업로드 ---- */
-async function doUploadTaskFileUI(ev,taskId){ var file=ev.target.files[0]; if(!file)return; showLoading(); var r=await ssUploadTaskFile(taskId,file); hideLoading(); if(r.success){ showToast('파일이 업로드되었습니다','success'); loadTaskDetail(taskId); } else showToast(r.error||'업로드 실패 (Storage 설정을 확인하세요)','error'); }
-async function doDropTaskFile(ev,taskId){ ev.preventDefault(); document.getElementById('dropzone-'+taskId).style.borderColor='var(--border-strong)'; var file=ev.dataTransfer.files[0]; if(!file)return; showLoading(); var r=await ssUploadTaskFile(taskId,file); hideLoading(); if(r.success){ showToast('파일이 업로드되었습니다','success'); loadTaskDetail(taskId); } else showToast(r.error||'업로드 실패 (Storage 설정을 확인하세요)','error'); }
+async function doUploadTaskFileUI(ev,taskId){ if(!FILE_UPLOAD_ENABLED){ ssUploadDisabledNotice(); return; } var file=ev.target.files[0]; if(!file)return; showLoading(); var r=await ssUploadTaskFile(taskId,file); hideLoading(); if(r.success){ showToast('파일이 업로드되었습니다','success'); loadTaskDetail(taskId); } else showToast(r.error||'업로드 실패 (Storage 설정을 확인하세요)','error'); }
+async function doDropTaskFile(ev,taskId){ ev.preventDefault(); if(!FILE_UPLOAD_ENABLED){ ssUploadDisabledNotice(); return; } document.getElementById('dropzone-'+taskId).style.borderColor='var(--border-strong)'; var file=ev.dataTransfer.files[0]; if(!file)return; showLoading(); var r=await ssUploadTaskFile(taskId,file); hideLoading(); if(r.success){ showToast('파일이 업로드되었습니다','success'); loadTaskDetail(taskId); } else showToast(r.error||'업로드 실패 (Storage 설정을 확인하세요)','error'); }
 async function doDeleteTaskFileUI(taskId,fileId){ showLoading(); var r=await ssDeleteTaskFile(taskId,fileId); hideLoading(); if(r.success) loadTaskDetail(taskId); }
 /* ---- #8 리뷰어 ---- */
 async function showReviewerModal(taskId){
@@ -1553,6 +1714,7 @@ const dayNamesEn=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 // 버튼 클릭과 키보드 단축키(←/→)가 같은 로직을 쓰도록 분리
 var calMode='month', calWeekStart=(function(){ var d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-d.getDay()); return d; })();
 function calSetMode(m){ calMode=m; if(m==='week'){ var d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-d.getDay()); calWeekStart=d; } renderCalendar(); }
+function calGoToday(){ var n=new Date(); calYear=n.getFullYear(); calMonth=n.getMonth(); if(calMode==='week'){ n.setHours(0,0,0,0); n.setDate(n.getDate()-n.getDay()); calWeekStart=n; } renderCalendar(); }
 function calPrevMonth(){ if(calMode==='week'){ calWeekStart=new Date(calWeekStart.getFullYear(),calWeekStart.getMonth(),calWeekStart.getDate()-7); renderCalendar(); return; } calMonth--; if(calMonth<0){ calMonth=11; calYear--; } renderCalendar(); }
 function calNextMonth(){ if(calMode==='week'){ calWeekStart=new Date(calWeekStart.getFullYear(),calWeekStart.getMonth(),calWeekStart.getDate()+7); renderCalendar(); return; } calMonth++; if(calMonth>11){ calMonth=0; calYear++; } renderCalendar(); }
 
@@ -1566,20 +1728,26 @@ async function renderCalendar(){
   events.forEach(e=>{ (dateMap[e.date]=dateMap[e.date]||[]).push({id:e.id,title:e.title,color:e.color||'6366F1',kind:'event',type:e.type}); });
   tasks.forEach(t=>{ if(t.dueDate) (dateMap[t.dueDate]=dateMap[t.dueDate]||[]).push({id:t.id,title:t.title,color:t.status==='done'?'059669':'E11D48',kind:'task'}); });
 
-  var weeks=ssGenerateCalendar(calYear,calMonth); var today=fmtDate(new Date());
-  var headRow = (currentLang==='en'?dayNamesEn:dayNamesKo).map((d,i)=>'<th class="py-2 text-meta font-semibold" style="'+(i===0?'color:var(--danger)':i===6?'color:var(--info)':'')+'">'+d+'</th>').join('');
-  var rows = weeks.map(week=>'<tr>'+week.map(day=>{
-    if(!day) return '<td class="p-1"></td>';
-    var dateStr=calYear+'-'+String(calMonth+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');
-    var isToday=dateStr===today; var items=dateMap[dateStr]||[];
-    return '<td class="p-1 align-top">'
-      +'<div onclick="showAddEventModal(\''+dateStr+'\')" class="min-h-[86px] rounded-xl p-1.5 cursor-pointer transition-colors" style="'+(isToday?'background:var(--primary-soft)':'')+'" onmouseover="if(!'+isToday+')this.style.background=\'var(--surface-2)\'" onmouseout="if(!'+isToday+')this.style.background=\'\'">'
-        +'<div class="w-5 h-5 flex items-center justify-center text-[11.5px] font-semibold rounded-full mb-1" style="'+(isToday?'background:var(--primary);color:#fff':'color:var(--text-2)')+'">'+day+'</div>'
-        + items.slice(0,2).map(it=>'<div onclick="event.stopPropagation();showDayModal(\''+dateStr+'\')" title="클릭: 보기/삭제" class="text-[10.5px] px-1.5 py-0.5 mb-0.5 rounded-md truncate" style="background:#'+it.color+'1C;color:#'+it.color+'">'+(it.kind==='task'?icon('bookmark','w-2.5 h-2.5 inline mr-0.5 -mt-0.5'):'')+escHtml(it.title)+'</div>').join('')
-        + (items.length>2? '<div onclick="event.stopPropagation();showDayModal(\''+dateStr+'\')" class="text-[10px] px-1" style="color:var(--text-3)">+'+(items.length-2)+'개</div>':'')
-      +'</div>'
-    +'</td>';
-  }).join('')+'</tr>').join('');
+  var today=fmtDate(new Date());
+  var headRow = (currentLang==='en'?dayNamesEn:dayNamesKo).map(function(d){return '<b>'+d+'</b>';}).join('');
+  // 피그마처럼: 앞·뒤 달의 날짜도 흐리게 채워 한 달이 꽉 찬 격자로 보이게 한다
+  var firstDow=new Date(calYear,calMonth,1).getDay(), dim=new Date(calYear,calMonth+1,0).getDate();
+  var totalCells=Math.ceil((firstDow+dim)/7)*7, cells='';
+  function pill(it,dateStr){
+    var isDefault=(it.kind==='event' && (it.color==='6366F1'||it.color==='6C5CE7'));
+    var st = isDefault ? 'background:#EDF5FB;color:#47799E' : 'background:#'+it.color+'1C;color:color-mix(in srgb,#'+it.color+' 60%,#000)';
+    return '<i onclick="event.stopPropagation();showDayModal(\''+dateStr+'\')" title="클릭: 보기/삭제" style="'+st+'">'+(it.kind==='task'?icon('bookmark','w-2.5 h-2.5 inline mr-0.5 -mt-0.5'):'')+escHtml(it.title)+'</i>';
+  }
+  for(var ci=0; ci<totalCells; ci++){
+    var dObj=new Date(calYear,calMonth,1-firstDow+ci), inMonth=(dObj.getMonth()===calMonth);
+    var dateStr=fmtDate(dObj), isToday=dateStr===today, items=dateMap[dateStr]||[];
+    cells+='<div class="'+(inMonth?'':'muted ')+(isToday?'current':'')+'" onclick="showAddEventModal(\''+dateStr+'\')">'
+      +'<span>'+dObj.getDate()+'</span>'
+      + items.slice(0,2).map(function(it){return pill(it,dateStr);}).join('')
+      + (items.length>2? '<em onclick="event.stopPropagation();showDayModal(\''+dateStr+'\')">+'+(items.length-2)+'개</em>':'')
+    +'</div>';
+  }
+  var rows='';
 
   var legend = '<div class="flex items-center gap-4 text-meta mt-3">'
     +'<span class="flex items-center gap-1.5">'+icon('bookmark','w-3 h-3')+'작업 마감일</span>'
@@ -1587,7 +1755,7 @@ async function renderCalendar(){
     +'<span class="ml-auto">빈 날짜를 누르면 일정 추가, 일정을 누르면 수정·삭제</span>'
   +'</div>';
 
-  var actions = '<div class="flex items-center gap-1">'
+  var actions = '<button onclick="calGoToday()" class="btn-secondary btn-sm">오늘</button><div class="flex items-center gap-1">'
     +'<button onclick="calPrevMonth()" class="icon-btn" aria-label="이전 달">'+icon('chevron-left')+'</button>'
     +'<span class="text-card-title text-center '+(calMode==='week'?'w-40':'w-28')+'">'+(calMode==='week'?(function(){ var e=new Date(calWeekStart.getFullYear(),calWeekStart.getMonth(),calWeekStart.getDate()+6); return (calWeekStart.getMonth()+1)+'/'+calWeekStart.getDate()+' – '+(e.getMonth()+1)+'/'+e.getDate(); })():(currentLang==='en'?monthNamesEn[calMonth]+' '+calYear:calYear+'년 '+monthNamesKo[calMonth]))+'</span>'
     +'<button onclick="calNextMonth()" class="icon-btn" aria-label="다음 달">'+icon('chevron-right')+'</button>'
@@ -1609,7 +1777,7 @@ async function renderCalendar(){
     return;
   }
   setContent(projectTabBar('calendar')+pageHeader(t('calendar'),'작업 마감일과 팀 일정을 한눈에', actions)
-    +'<div class="px-6 pb-8"><div class="card card-pad overflow-x-auto"><table class="w-full min-w-[560px] border-collapse"><thead><tr>'+headRow+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+legend+'</div>');
+    +'<div class="px-6 pb-8"><div class="card ss-cal overflow-x-auto"><div class="ss-calgrid">'+headRow+cells+'</div></div>'+legend+'</div>');
 }
 /* 날짜를 눌렀을 때: 그날의 일정·작업 마감 목록. 일정은 여기서 삭제할 수 있다(삭제 후 실행취소 가능). */
 var calEventsCache=[];
@@ -1668,10 +1836,10 @@ function showAddEventModal(date){
     +'<div><label class="field-label">날짜</label><input type="date" id="event-date" value="'+date+'" class="input">'+ssDateChips('event-date')+'</div>'
     +'<div><label class="field-label">유형</label><select id="event-type" class="input"><option value="event">일반 이벤트</option><option value="milestone">마일스톤</option><option value="deadline">마감</option></select></div>'
     +'</div>',
-    '<button onclick="closeModal()" class="btn-secondary">취소</button><button onclick="doAddEvent()" class="btn-primary">'+icon('plus','w-4 h-4')+'추가</button>'
+    '<label class="text-meta flex items-center gap-1.5 mr-auto" style="cursor:pointer"><input type="checkbox" id="event-keep-adding" '+(window._keepAddingEvent?'checked':'')+'> 계속 추가</label><button onclick="closeModal()" class="btn-secondary">취소</button><button onclick="doAddEvent()" class="btn-primary">'+icon('plus','w-4 h-4')+'추가</button>'
   ));
 }
-async function doAddEvent(){var title=document.getElementById('event-title').value.trim();ssClearFieldError('event-title');if(!title){ssFieldError('event-title','일정 제목을 입력해 주세요');document.getElementById('event-title').focus();return;}showLoading();var r=await ssCreateEvent(currentProjectId,{title,date:document.getElementById('event-date').value,type:document.getElementById('event-type').value});hideLoading();if(r.success){ssClearDraft('event-title');closeModal();showToast('일정이 추가되었습니다','success');renderCalendar();}else showToast(r.error,'error');}
+async function doAddEvent(){var title=document.getElementById('event-title').value.trim();ssClearFieldError('event-title');if(!title){ssFieldError('event-title','일정 제목을 입력해 주세요');document.getElementById('event-title').focus();return;}showLoading();var r=await ssCreateEvent(currentProjectId,{title,date:document.getElementById('event-date').value,type:document.getElementById('event-type').value});hideLoading();if(r.success){ssClearDraft('event-title');var kEl=document.getElementById('event-keep-adding'),keep=!!(kEl&&kEl.checked);window._keepAddingEvent=keep;var kd=document.getElementById('event-date').value,kt=document.getElementById('event-type').value;closeModal();showToast('일정이 추가되었습니다','success');renderCalendar();if(keep){showAddEventModal(kd);var te=document.getElementById('event-type');if(te)te.value=kt;}}else showToast(r.error,'error');}
 
 /* ================================================================
    파트별(역할별) 진행률
@@ -1739,7 +1907,7 @@ async function renderRoles(){
   var myColor=myRole?myRole.color:'var(--primary)';
 
   var R=54, C=2*Math.PI*R;
-  var hero='<div class="rounded-2xl p-6 md:p-7 flex items-center gap-6 flex-wrap" style="background:linear-gradient(135deg,var(--primary),#7c3aed);color:#fff">'
+  var hero='<div class="rounded-2xl p-6 md:p-7 flex items-center gap-6 flex-wrap" style="background:linear-gradient(135deg,var(--primary),#5948CE);color:#fff">'
     +'<div class="relative shrink-0" style="width:128px;height:128px">'
       +'<svg viewBox="0 0 132 132" style="width:100%;height:100%;transform:rotate(-90deg)" aria-hidden="true">'
         +'<circle cx="66" cy="66" r="'+R+'" fill="none" stroke="rgba(255,255,255,.22)" stroke-width="12"/>'
@@ -1815,7 +1983,7 @@ async function renderRoles(){
     return '<div class="card card-pad">'
       +'<div class="flex items-center justify-between mb-4">'
         +'<div class="flex items-center gap-2.5 font-bold text-[15px]" style="color:var(--text)"><span style="width:10px;height:10px;border-radius:50%;background:'+r.color+'"></span>'+r.label+'</div>'
-        +'<div class="text-[21px] font-extrabold" style="color:'+(r.total?r.color:'var(--text-3)')+'">'+r.percent+'%</div>'
+        +'<div class="text-[21px] font-extrabold" style="color:var(--text)">'+r.percent+'%</div>'
       +'</div>'
       +'<div role="progressbar" aria-label="'+r.label+' 진행률" aria-valuenow="'+r.percent+'" aria-valuemin="0" aria-valuemax="100" style="height:10px;border-radius:999px;background:var(--surface-2);overflow:hidden">'
         +'<i class="role-bar" data-width="'+r.percent+'" style="display:block;height:100%;width:0;border-radius:999px;background:'+r.color+';transition:width 1s cubic-bezier(.22,1,.36,1)"></i>'
@@ -1938,33 +2106,41 @@ async function doSetMyProgressQuick(pct){
    팀
    ================================================================ */
 async function renderTeam(){
+  ssTeamRole='all';
   if(!currentProjectId){ setContent(pageHeader(t('team'))+noProjectState()); return; }
   setContent(pageHeader(t('team'))+skeletonGrid(3,'md:grid-cols-1'));
   var r=await ssGetProjectMembers(currentProjectId); var tasksR=await ssGetTasks(currentProjectId);
   var invitesR=await ssGetPendingInvites(currentProjectId);
   var members=r.members||[]; var tasks=tasksR.tasks||[]; var pendingInvites=invitesR.invites||[];
   var myRole=getMyRole(currentProject);
-  var stats=members.map(m=>{ var mt=tasks.filter(t=>t.assigneeId===m.uid); var done=mt.filter(t=>t.status==='done').length; var role=(m.uid===currentProject.ownerId)?'owner':((currentProject.memberRoles&&currentProject.memberRoles[m.uid])||'editor'); return {...m,total:mt.length,done:done,rate:mt.length?Math.round(done/mt.length*100):0,role:role}; });
+  var stats=members.map(m=>{ var mt=tasks.filter(t=>t.assigneeId===m.uid); var done=mt.filter(t=>t.status==='done').length; var role=(m.uid===currentProject.ownerId)?'owner':(m.demoRole||(currentProject.memberRoles&&currentProject.memberRoles[m.uid])||'editor'); return {...m,total:mt.length,done:done,rate:mt.length?Math.round(done/mt.length*100):0,role:role}; });
 
   var rows = stats.map(m=>
-    '<div class="flex items-center flex-wrap gap-x-4 gap-y-2 px-4 py-3.5">'
-      +avatarCircle(m.avatar,'w-10 h-10 text-xl')
-      +'<div class="min-w-[7rem] flex-1"><div class="text-card-title flex items-center gap-1.5">'+escHtml(m.name)+(currentUser.uid===m.uid?'<span class="badge-neutral">나</span>':'')+'</div>'
-      +'<div class="text-meta mt-0.5 truncate">'+escHtml(m.email||'')+'</div></div>'
-      +'<div class="hidden sm:flex items-center gap-6 text-center">'
-        +'<div><div class="text-card-title">'+m.total+'</div><div class="text-meta">작업</div></div>'
-        +'<div><div class="text-card-title" style="color:var(--success)">'+m.done+'</div><div class="text-meta">완료</div></div>'
-        +'<div class="w-16"><div class="progress-track h-1.5 mb-1"><div class="progress-fill" style="width:'+m.rate+'%"></div></div><div class="text-meta">'+m.rate+'%</div></div>'
+    '<div class="ss-member card" data-role="'+m.role+'" data-name="'+escHtml((m.name||'')+' '+(m.email||'')).toLowerCase()+'">'
+      +'<div class="ss-member-top">'+avatarCircle(m.avatar,'w-12 h-12 text-2xl')+roleBadge(m.role)+'</div>'
+      +'<div class="ss-member-name">'+escHtml(m.name)+(currentUser.uid===m.uid?'<span class="badge-neutral ml-1.5">나</span>':'')+'</div>'
+      +'<div class="text-meta truncate">'+escHtml(m.email||'')+'</div>'
+      +'<div class="ss-member-stats">'
+        +'<div><span>담당 작업</span><b>'+m.total+'개</b></div>'
+        +'<div><span>완료</span><b style="color:var(--success)">'+m.done+'개</b></div>'
+        +'<div><span>달성률</span><b>'+m.rate+'%</b></div>'
       +'</div>'
-      + (myRole==='owner' && m.role!=='owner'
-        ? '<div class="flex items-center gap-1.5 shrink-0 ml-auto">'
-          +'<select onchange="doChangeMemberRole(\''+m.uid+'\',this.value)" class="input h-8 text-[12px]" style="width:auto"><option value="editor" '+(m.role==='editor'?'selected':'')+'>편집자</option><option value="viewer" '+(m.role==='viewer'?'selected':'')+'>뷰어</option></select>'
-          +'<button onclick="doTransferOwnership(\''+m.uid+'\',\''+escHtml(m.name).replace(/'/g,"\\'")+'\')" class="icon-btn w-8 h-8" title="소유자로 지정" aria-label="소유자로 지정">'+icon('crown','w-3.5 h-3.5')+'</button>'
-          +'<button onclick="doRemoveMember(\''+m.uid+'\',\''+escHtml(m.name).replace(/'/g,"\\'")+'\')" class="icon-btn w-8 h-8" style="color:var(--danger)" title="프로젝트에서 내보내기" aria-label="프로젝트에서 내보내기">'+icon('user-x','w-3.5 h-3.5')+'</button>'
-          +'</div>'
-        : roleBadge(m.role))
+      +'<div class="progress-track h-1.5 mb-3"><div class="progress-fill" style="width:'+m.rate+'%"></div></div>'
+      +'<div class="flex items-center gap-2">'
+        +'<button onclick="showView(\'chat\')" class="ss-wide-btn" style="margin:0;flex:1">'+icon('message-square','w-4 h-4')+'메시지 보내기</button>'
+        + (myRole==='owner' && m.role!=='owner' && !m.demo
+          ? '<select onchange="doChangeMemberRole(\''+m.uid+'\',this.value)" class="input h-9 text-[12px]" style="width:auto" aria-label="권한 변경"><option value="editor" '+(m.role==='editor'?'selected':'')+'>편집자</option><option value="viewer" '+(m.role==='viewer'?'selected':'')+'>뷰어</option></select>'
+            +'<button onclick="doTransferOwnership(\''+m.uid+'\',\''+escHtml(m.name).replace(/'/g,"\\'")+'\')" class="icon-btn w-9 h-9" title="소유자로 지정" aria-label="소유자로 지정">'+icon('crown','w-3.5 h-3.5')+'</button>'
+            +'<button onclick="doRemoveMember(\''+m.uid+'\',\''+escHtml(m.name).replace(/'/g,"\\'")+'\')" class="icon-btn w-9 h-9" style="color:var(--danger)" title="프로젝트에서 내보내기" aria-label="프로젝트에서 내보내기">'+icon('user-x','w-3.5 h-3.5')+'</button>'
+          : '')
+      +'</div>'
     +'</div>'
   ).join('');
+  var totalTasks=stats.reduce((n,m)=>n+m.total,0), totalDone=stats.reduce((n,m)=>n+m.done,0);
+  var teamStrip=ssStatStrip([{icon:'users',tone:'primary',label:'전체 멤버',value:members.length+'명'},{icon:'list-checks',tone:'warning',label:'담당 작업',value:totalTasks+'개'},{icon:'check',tone:'success',label:'완료한 작업',value:totalDone+'개'},{icon:'gauge',tone:'info',label:'팀 달성률',value:(totalTasks?Math.round(totalDone/totalTasks*100):0)+'%'}]);
+  var teamFilter='<div class="card ss-filterbar"><div class="ss-filter-search"><span>'+icon('search','w-4 h-4')+'</span><input type="text" id="team-q" class="input" placeholder="이름, 이메일 검색" aria-label="멤버 검색" oninput="ssTeamFilter()"></div>'
+    +'<div class="flex items-center gap-1.5 flex-wrap" id="team-chips">'+[['all','전체'],['owner','오너'],['editor','편집자'],['viewer','뷰어']].map(function(c,i){return '<button class="ss-chip'+(i===0?' active':'')+'" data-role="'+c[0]+'" onclick="ssTeamFilter(\''+c[0]+'\')">'+c[1]+'</button>';}).join('')+'</div>'
+    +'<span class="text-meta ml-auto" id="team-count">'+members.length+'명의 멤버</span></div>';
 
   var invitesHtml = (myRole!=='viewer' && pendingInvites.length)
     ? '<div class="mt-5"><div class="text-meta font-semibold uppercase tracking-wide mb-2 px-1">대기 중인 초대</div><div class="card divide-hair">'
@@ -1979,7 +2155,18 @@ async function renderTeam(){
     : '';
 
   setContent(projectTabBar('team')+pageHeader(t('team'), members.length+'명이 참여 중', myRole!=='viewer'?'<button onclick="showInviteModal()" class="btn-primary">'+icon('user-plus','w-4 h-4')+'초대</button>':'')
-    +'<div class="px-6 pb-8 max-w-2xl mx-auto">'+(members.length?'<div class="card divide-hair">'+rows+'</div>':emptyState('users','아직 멤버가 없어요','이메일로 팀원을 초대해보세요.',''))+invitesHtml+'</div>');
+    +'<div class="px-6 pb-8 space-y-4">'+(members.length?teamStrip+teamFilter+'<div class="ss-member-grid" id="team-grid">'+rows+'</div>':emptyState('users','아직 멤버가 없어요','이메일로 팀원을 초대해보세요.',''))+invitesHtml+'</div>');
+}
+var ssTeamRole='all';
+function ssTeamFilter(role){
+  if(role) ssTeamRole=role;
+  var q=((document.getElementById('team-q')||{}).value||'').trim().toLowerCase(), n=0;
+  document.querySelectorAll('#team-grid .ss-member').forEach(function(c){
+    var ok=(ssTeamRole==='all'||c.dataset.role===ssTeamRole)&&(!q||c.dataset.name.indexOf(q)!==-1);
+    c.style.display=ok?'':'none'; if(ok) n++;
+  });
+  document.querySelectorAll('#team-chips .ss-chip').forEach(function(b){ b.classList.toggle('active',b.dataset.role===ssTeamRole); });
+  var cnt=document.getElementById('team-count'); if(cnt) cnt.textContent=n+'명의 멤버';
 }
 async function doCancelInvite(inviteId){
   showLoading(); var r=await ssCancelInvite(inviteId); hideLoading();
@@ -2085,6 +2272,43 @@ async function doInvite(){var email=document.getElementById('invite-email').valu
 /* ---- 팀 채팅 실시간 수신 ----
    채팅 화면이 열려 있는 동안만 Firestore 구독을 유지하고, 새 메시지/삭제가 생기면
    입력창은 그대로 둔 채(작성 중인 글 보존) 메시지 목록만 갈아끼운다. */
+/* ---- 채팅 안 읽은 메시지 배지 ----
+   현재 프로젝트의 최근 메시지 20개를 구독해, 마지막으로 채팅을 본 시각 이후에 다른 사람이 보낸 메시지 수를 표시한다.
+   '마지막으로 본 시각'은 이 브라우저(localStorage)에 계정·프로젝트별로 저장한다. */
+var chatUnreadUnsub=null, chatUnreadPid=null, chatUnreadCount=0;
+function ssChatReadKey(pid){ return 'ss-chatread:'+(currentUser?currentUser.uid:'')+':'+pid; }
+function updateChatBadge(){
+  var b=document.getElementById('chat-badge');
+  if(b){ if(chatUnreadCount>0){ b.textContent=chatUnreadCount>9?'9+':chatUnreadCount; b.classList.remove('hidden'); } else b.classList.add('hidden'); }
+  document.querySelectorAll('.chat-badge-dot').forEach(function(d){ d.style.display=chatUnreadCount>0?'block':'none'; });
+}
+function ssMarkChatRead(pid){
+  if(!pid) return;
+  try{ localStorage.setItem(ssChatReadKey(pid), String(Date.now())); }catch(e){}
+  chatUnreadCount=0; updateChatBadge();
+}
+function stopChatUnreadListener(){
+  if(chatUnreadUnsub){ try{ chatUnreadUnsub(); }catch(e){} }
+  chatUnreadUnsub=null; chatUnreadPid=null; chatUnreadCount=0; updateChatBadge();
+}
+function syncChatUnreadListener(){
+  var pid=(isLoggedIn && currentUser) ? currentProjectId : null;
+  if(pid===chatUnreadPid) return;
+  stopChatUnreadListener();
+  if(!pid) return;
+  chatUnreadPid=pid;
+  try{
+    chatUnreadUnsub=db.collection('projects').doc(pid).collection('chat').orderBy('createdAt','desc').limit(20)
+      .onSnapshot(function(snap){
+        if(chatUnreadPid!==pid || !currentUser) return;
+        if(currentView==='chat'){ ssMarkChatRead(pid); return; }
+        var last=0; try{ last=Number(localStorage.getItem(ssChatReadKey(pid)))||0; }catch(e){}
+        var n=0;
+        snap.forEach(function(doc){ var d=doc.data(); var ts=(d.createdAt&&d.createdAt.toMillis)?d.createdAt.toMillis():0; if(d.authorId!==currentUser.uid && ts>last) n++; });
+        chatUnreadCount=n; updateChatBadge();
+      },function(err){ console.warn('채팅 안 읽음 표시 수신 실패:', err); stopChatUnreadListener(); });
+  }catch(e){ console.warn('채팅 안 읽음 표시 수신 실패:', e); }
+}
 var chatUnsubscribe=null;
 function stopChatListener(){
   if(chatUnsubscribe){ try{ chatUnsubscribe(); }catch(e){} }
@@ -2097,6 +2321,7 @@ function startChatListener(projectId){
       .orderBy('createdAt','desc').limit(50)
       .onSnapshot(function(snap){
         if(currentView!=='chat' || currentProjectId!==projectId) return;
+        if(chatSearchQuery){ chatSearchCache=null; return; }   // 검색 결과를 보는 중에는 목록을 덮어쓰지 않는다
         var box=document.getElementById('chat-messages'); if(!box) return;
         var messages=[];
         snap.forEach(function(doc){ var d=doc.data(); messages.push({id:doc.id,...d,createdAt:d.createdAt?d.createdAt.toDate():null}); });
@@ -2110,40 +2335,84 @@ function startChatListener(projectId){
       },function(err){ console.error('채팅 실시간 수신 실패:', err); stopChatListener(); });
   }catch(e){ console.error('채팅 실시간 수신 실패:', e); }
 }
-function chatMessagesHtml(messages,myRole){
+function chatMessagesHtml(messages,myRole,hl){
   return messages.length ? messages.map(m=>{
     var isMe=m.authorId===currentUser.uid;
     var canDelete=isMe||myRole==='owner';
-    return '<div class="flex gap-2.5 '+(isMe?'flex-row-reverse':'')+' mb-3">'
-      + avatarCircle(m.authorAvatar,'w-8 h-8 text-base shrink-0')
-      + '<div class="'+(isMe?'items-end':'items-start')+' flex flex-col max-w-[75%]">'
-        + '<span class="text-meta mb-1">'+escHtml(m.authorName)+'</span>'
-        + '<div class="px-3.5 py-2 rounded-2xl text-[13.5px]" style="'+(isMe?'background:var(--primary);color:#fff;border-bottom-right-radius:4px':'background:var(--surface-2);color:var(--text);border-bottom-left-radius:4px')+'">'+escHtml(m.content)+'</div>'
-        + '<div class="flex items-center gap-2 mt-1">'
-          + '<span class="text-meta">'+relDate(m.createdAt)+'</span>'
-          + (canDelete? '<button onclick="doDeleteChatMessage(\''+m.id+'\')" class="text-meta" style="color:var(--danger);background:none;border:none;cursor:pointer;padding:0" title="삭제">삭제</button>':'')
+    return '<div class="ss-msg'+(isMe?' me':'')+'">'
+      + avatarCircle(m.authorAvatar,'w-9 h-9 text-base shrink-0')
+      + '<div class="ss-msg-body">'
+        + '<div class="ss-msg-head"><b>'+escHtml(m.authorName)+'</b><span>'+relDate(m.createdAt)+'</span>'
+          + (canDelete? '<button onclick="doDeleteChatMessage(\''+m.id+'\')" class="ss-msg-del" title="삭제">삭제</button>':'')
         +'</div>'
+        + '<div class="ss-bubble">'+(hl?highlightMatch(escHtml(m.content),hl):escHtml(m.content))+'</div>'
       +'</div></div>';
   }).join('') : emptyState('message-square','아직 메시지가 없어요','첫 메시지를 보내 대화를 시작해보세요.','');
 }
+/* 채팅 검색: 최근 300개 메시지를 한 번 불러와 내용·보낸 사람 이름으로 찾는다 */
+var chatSearchQuery='', chatSearchCache=null, chatSearchTimer=null;
+function onChatSearchInput(){ clearTimeout(chatSearchTimer); chatSearchTimer=setTimeout(runChatSearch,250); }
+function clearChatSearch(){ var el=document.getElementById('chat-search'); if(el) el.value=''; runChatSearch(); }
+async function runChatSearch(){
+  var el=document.getElementById('chat-search'); if(!el) return;
+  var q=el.value.trim(); chatSearchQuery=q;
+  var clr=document.getElementById('chat-search-clear'); if(clr) clr.style.display=q?'flex':'none';
+  var box=document.getElementById('chat-messages'); if(!box) return;
+  var role=getMyRole(currentProject);
+  if(!q){
+    chatSearchCache=null;
+    var r=await ssGetChatMessages(currentProjectId);
+    if(chatSearchQuery) return;
+    box.innerHTML=chatMessagesHtml(r.messages||[],role); box.scrollTop=box.scrollHeight; refreshIcons(); return;
+  }
+  if(!chatSearchCache){ var r2=await ssGetRecentChatMessages(currentProjectId,300); chatSearchCache=r2.messages||[]; }
+  if(chatSearchQuery!==q) return;   // 그 사이 검색어가 바뀌었으면 버린다
+  var ql=q.toLowerCase();
+  var hits=chatSearchCache.filter(function(m){ return (m.content||'').toLowerCase().indexOf(ql)!==-1 || (m.authorName||'').toLowerCase().indexOf(ql)!==-1; });
+  box.innerHTML='<div class="text-meta mb-3">“'+escHtml(q)+'” 검색 결과 '+hits.length+'개 (최근 메시지 '+chatSearchCache.length+'개 중)</div>'
+    +(hits.length?chatMessagesHtml(hits,role,q):emptyState('search','검색 결과가 없어요','다른 단어로 다시 찾아보세요.',''));
+  box.scrollTop=0; refreshIcons();
+}
+function ssChatMention(name){
+  var el=document.getElementById('chat-input'); if(!el) return;
+  el.value=(el.value?el.value.replace(/\s*$/,' '):'')+'@'+name+' '; el.focus();
+}
 async function renderChat(){
+  chatSearchQuery=''; chatSearchCache=null;
   if(!currentProjectId){ setContent(pageHeader(t('chat'))+noProjectState()); return; }
   setContent(pageHeader(t('chat')));
   var messagesR=await ssGetChatMessages(currentProjectId); var messages=messagesR.messages||[];
+  var memR=await ssGetProjectMembers(currentProjectId); var members=memR.members||[];
   var myRole=getMyRole(currentProject);
   var msgHtml=chatMessagesHtml(messages,myRole);
-
+  var side='<aside class="ss-chat-side">'
+    + '<div class="ss-chat-side-head"><h2>대화</h2></div>'
+    + '<div class="ss-chat-search"><div style="position:relative"><span class="ss-chat-search-ic">'+icon('search','w-3.5 h-3.5')+'</span>'
+      + '<input type="text" id="chat-search" placeholder="메시지 검색" aria-label="메시지 검색" class="input" style="padding-left:32px;padding-right:2rem" oninput="onChatSearchInput()" onkeydown="if(event.key===\'Escape\')clearChatSearch()">'
+      + '<button id="chat-search-clear" onclick="clearChatSearch()" class="icon-btn" title="검색 지우기" aria-label="검색 지우기" style="display:none;position:absolute;right:4px;top:50%;transform:translateY(-50%);width:26px;height:26px">'+icon('x','w-3.5 h-3.5')+'</button></div></div>'
+    + '<div class="ss-chat-label">채널</div>'
+    + '<div class="ss-chat-chan active"><span>#</span><b>프로젝트 전체</b></div>'
+    + '<div class="ss-chat-label" style="margin-top:14px">팀 멤버 · 눌러서 멘션</div>'
+    + members.map(function(m){ return '<button class="ss-chat-member" onclick="ssChatMention(\''+escHtml(m.name).replace(/'/g,"\\'")+'\')">'+avatarCircle(m.avatar,'w-8 h-8 text-sm shrink-0')+'<span class="truncate">'+escHtml(m.name)+(currentUser.uid===m.uid?' <em>나</em>':'')+'</span></button>'; }).join('')
+    + '</aside>';
   setContent('<div class="chat-shell flex flex-col">'
     + projectTabBar('chat')
-    + pageHeader(t('chat'))
-    + '<div class="flex-1 overflow-y-auto px-6" id="chat-messages">'+msgHtml+'</div>'
-    + '<div class="px-6 py-4 mt-2" style="border-top:1px solid var(--border)"><div class="flex gap-2">'
-      + '<input type="text" id="chat-input" placeholder="메시지를 입력하세요... (@이름으로 멘션)" class="input flex-1" onkeypress="if(event.key===\'Enter\'&&!mentionIsActive())doSendChatMessage()">'
-      + '<button onclick="doSendChatMessage()" class="btn-primary">'+icon('send','w-4 h-4')+'전송</button>'
-    + '</div></div></div>');
+    + '<div class="ss-chat">'
+      + side
+      + '<section class="ss-chat-main">'
+        + '<header class="ss-chat-head"><span class="ss-chat-hash">#</span><div class="min-w-0 flex-1"><h2>프로젝트 전체</h2><p class="truncate">'+escHtml(currentProject.name)+' 팀의 대화 공간</p></div>'
+          + '<span class="ss-chat-count">'+icon('users','w-3.5 h-3.5')+'멤버 '+members.length+'명</span></header>'
+        + '<div class="ss-chat-msgs" id="chat-messages">'+msgHtml+'</div>'
+        + '<div class="ss-composer"><div class="ss-composer-box">'
+          + '<input type="text" id="chat-input" placeholder="#프로젝트 전체에 메시지 보내기 (@이름으로 멘션)" onkeypress="if(event.key===\'Enter\'&&!mentionIsActive())doSendChatMessage()">'
+          + '<div class="ss-composer-foot"><span>Enter로 전송</span><button onclick="doSendChatMessage()" class="ss-send" aria-label="전송">'+icon('send','w-4 h-4')+'</button></div>'
+        + '</div></div>'
+      + '</section>'
+    + '</div></div>');
   var c=document.getElementById('chat-messages'); if(c)c.scrollTop=c.scrollHeight;
   attachMentionAutocomplete('chat-input');
   startChatListener(currentProjectId);
+  ssMarkChatRead(currentProjectId);
 }
 async function doSendChatMessage(){
   var input=document.getElementById('chat-input');var content=input.value.trim();if(!content)return;input.value='';ssClearDraft('chat-input');
@@ -2164,20 +2433,31 @@ async function doSendChatMessage(){
 async function doDeleteChatMessage(messageId){
   if(!confirm('메시지를 삭제하시겠습니까?'))return;
   var r=await ssDeleteChatMessage(currentProjectId,messageId);
-  if(r.success){ if(!chatUnsubscribe) renderChat(); }
-  else showToast('삭제에 실패했습니다','error');
+  if(r.success){ if(chatSearchQuery){ chatSearchCache=null; runChatSearch(); } else if(!chatUnsubscribe) renderChat(); }
+  else showToast(r.error||'삭제에 실패했습니다','error');
 }
 
 /* ================================================================
    알림
    ================================================================ */
+/* 요약 줄(아이콘 칸 + 라벨 + 숫자) — 내 작업·알림에서 같은 모양으로 쓴다 */
+function ssStatStrip(items){
+  return '<div class="card ss-strip">'+items.map(function(i){
+    return '<div><span class="ss-tile ss-tone-'+i.tone+'">'+icon(i.icon,'w-5 h-5')+'</span><div class="min-w-0"><div class="text-meta">'+i.label+'</div><div class="ss-stat-val">'+i.value+'</div></div></div>';
+  }).join('')+'</div>';
+}
+function ssNotifTone(type){ return ({task_assigned:'info',comment_added:'primary',mention:'primary',review_request:'warning',ownership_transferred:'success',project_invite:'primary',part_assigned:'info',chat_message:'primary'})[type]||'primary'; }
+function ssIsToday(d){ if(!d) return false; var x=new Date(d), n=new Date(); return x.getFullYear()===n.getFullYear()&&x.getMonth()===n.getMonth()&&x.getDate()===n.getDate(); }
+var notifTab='all';
 async function renderNotifications(){
   setContent(pageHeader(t('notifications'))+skeletonGrid(3,'md:grid-cols-1'));
   var r=await ssGetNotifications(); var notifs=(r.notifications||[]).filter(n=>notifTypeAllowed(n.type));
   var hasUnread=notifs.some(n=>!n.read);
-  var list = notifs.length ? '<div class="card divide-hair">'+notifs.map(n=>
-    '<div class="flex items-start gap-3 px-4 py-3.5" style="'+(!n.read?'':'opacity:.6')+'">'
-      +'<div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5 icon-tile-soft">'+icon(notifMeta(n.type).icon,'w-4 h-4').replace('class="','style="color:var(--primary-soft-text)" class="')+'</div>'
+  var unreadN=notifs.filter(n=>!n.read).length, todayN=notifs.filter(n=>ssIsToday(n.createdAt)).length;
+  var shown=notifTab==='unread'?notifs.filter(n=>!n.read):notifs;
+  function rowHtml(n){
+    return '<div class="flex items-start gap-3 px-4 py-3.5" style="'+(!n.read?'background:rgba(108,92,231,.05)':'')+'">'
+      +'<span class="ss-tile ss-tone-'+ssNotifTone(n.type)+'">'+icon(notifMeta(n.type).icon,'w-5 h-5')+'</span>'
       +'<div class="min-w-0 flex-1"><div class="flex items-center justify-between gap-2"><span class="text-card-title">'+notifMeta(n.type).label+'</span><span class="flex items-center gap-1 shrink-0"><span class="text-meta">'+relDate(n.createdAt)+'</span>'+(ssNotifDeletable(n)?'<button onclick="doDeleteNotification(\''+n.id+'\','+(!n.read)+')" class="icon-btn" style="width:28px;height:28px" title="알림 삭제" aria-label="알림 삭제">'+icon('x','w-3.5 h-3.5')+'</button>':'')+'</span></div>'
       +'<p class="text-body mt-0.5">'+escHtml(n.taskTitle||n.message||'새로운 알림')+'</p>'
       + (n.type==='project_invite'
@@ -2186,16 +2466,26 @@ async function renderNotifications(){
             : '<div class="flex gap-2 mt-1.5"><button onclick="doAcceptInvite(\''+n.id+'\',\''+n.inviteId+'\')" class="btn-sm btn-primary">'+icon('check','w-3.5 h-3.5')+'수락</button><button onclick="doDeclineInvite(\''+n.id+'\',\''+n.inviteId+'\')" class="btn-sm" style="background:var(--surface-2);color:var(--text-2)">거절</button></div>')
         : (!n.read? '<button onclick="doMarkRead(\''+n.id+'\')" class="text-[12px] font-semibold mt-1.5" style="color:var(--primary)">읽음으로 표시</button>':''))
       +'</div>'
-      +(!n.read?'<div class="w-1.5 h-1.5 rounded-full shrink-0 mt-2" style="background:var(--primary)"></div>':'')
-    +'</div>'
-  ).join('')+'</div>' : emptyState('bell-off','알림이 없어요','새로운 소식이 있으면 여기에 표시됩니다.','');
+      +(!n.read?'<span class="w-2 h-2 rounded-full shrink-0 mt-2" style="background:var(--primary)" aria-label="읽지 않음"></span>':'')
+    +'</div>';
+  }
+  var head=function(label){ return '<div class="ss-group-head">'+label+'</div>'; };
+  var todayList=shown.filter(n=>ssIsToday(n.createdAt)), earlier=shown.filter(n=>!ssIsToday(n.createdAt));
+  var list;
+  if(!notifs.length) list=emptyState('bell-off','알림이 없어요','새로운 소식이 있으면 여기에 표시됩니다.','');
+  else if(!shown.length) list='<div class="card">'+emptyState('check-check','모두 읽었어요','읽지 않은 알림이 없어요.','')+'</div>';
+  else list='<div class="card divide-hair overflow-hidden">'+(todayList.length?head('오늘')+todayList.map(rowHtml).join(''):'')+(earlier.length?head('이전')+earlier.map(rowHtml).join(''):'')+'</div>';
+  var tabs=notifs.length?'<div class="flex gap-2 flex-wrap">'
+    +'<button onclick="notifTab=\'all\';renderNotifications()" class="ss-chip'+(notifTab==='all'?' active':'')+'">전체 '+notifs.length+'</button>'
+    +'<button onclick="notifTab=\'unread\';renderNotifications()" class="ss-chip'+(notifTab==='unread'?' active':'')+'">읽지 않음 '+unreadN+'</button></div>':'';
+  var strip=notifs.length?ssStatStrip([{icon:'bell',tone:'primary',label:'읽지 않은 알림',value:unreadN+'개'},{icon:'clock',tone:'warning',label:'오늘 받은 알림',value:todayN+'개'}]):'';
 
   setContent(pageHeader(t('notifications'),null,
       '<button onclick="showWeeklyDigest()" class="btn-secondary" title="주간 요약">'+icon('mail','w-4 h-4')+'주간 요약</button>'
-      +(notifs.some(ssNotifDeletable)? '<button onclick="doDeleteNotifications(\'read\')" class="btn-ghost" title="읽은 알림 모두 삭제">'+icon('trash-2','w-4 h-4')+'읽은 알림 삭제</button>':'')
-      +(hasUnread? '<button onclick="doMarkAllRead()" class="btn-ghost">'+icon('check-check','w-4 h-4')+'모두 읽음</button>':'')
-      +'<button onclick="showView(\'profile\')" class="btn-ghost" title="알림 설정">'+icon('settings','w-4 h-4')+'</button>')
-    +'<div class="px-6 pb-8 max-w-2xl mx-auto">'+list+'</div>');
+      +(notifs.some(ssNotifDeletable)? '<button onclick="doDeleteNotifications(\'read\')" class="btn-ghost" title="읽은 알림 모두 삭제" aria-label="읽은 알림 삭제">'+icon('trash-2','w-4 h-4')+'<span class="ss-lbl">읽은 알림 삭제</span></button>':'')
+      +(hasUnread? '<button onclick="doMarkAllRead()" class="btn-ghost" aria-label="모두 읽음">'+icon('check-check','w-4 h-4')+'<span class="ss-lbl">모두 읽음</span></button>':'')
+      +'<button onclick="showView(\'profile\')" class="btn-ghost" title="알림 설정" aria-label="알림 설정">'+icon('settings','w-4 h-4')+'</button>')
+    +'<div class="px-6 pb-8 max-w-3xl mx-auto space-y-4">'+strip+tabs+list+'</div>');
 }
 /* 알림 삭제: 아직 수락/거절하지 않은 초대 알림은 지울 수 없다(초대를 잃지 않도록) */
 function ssNotifDeletable(n){ return !(n.type==='project_invite' && !n.resolution); }
@@ -2313,32 +2603,49 @@ async function doLeaveProject(projectId,name){
 /* ================================================================
    프로필
    ================================================================ */
+function setProfileTab(k){
+  window.profileTab=k;
+  document.querySelectorAll('.ss-prof [data-ptab]').forEach(function(e){ e.classList.toggle('ss-ptab-hide', e.getAttribute('data-ptab')!==k); });
+  document.querySelectorAll('.ss-prof [data-pnav]').forEach(function(e){ e.classList.toggle('on', e.getAttribute('data-pnav')===k); });
+}
 async function renderProfile(){
   setContent(pageHeader(t('profile'))+'<div class="px-6 pb-8 max-w-lg mx-auto space-y-5">'+skeletonGrid(3,'md:grid-cols-1')+'</div>');
   if(!allProjects.length) await loadProjects();
   var joinedDate=currentUser.createdAt ? (currentUser.createdAt.toDate?currentUser.createdAt.toDate():currentUser.createdAt) : null;
   setContent(
     pageHeader(t('profile'))
-    +'<div class="px-6 pb-8 max-w-lg mx-auto space-y-5">'
+    +'<div class="ss-prof">'+'<nav class="ss-pnav">'+[['account','user','계정'],['display','monitor','화면'],['notif','bell','알림'],['projects','folder-kanban','내 프로젝트'],['danger','shield-alert','계정 삭제']].map(function(r){return '<button data-pnav="'+r[0]+'" onclick="setProfileTab(\''+r[0]+'\')">'+icon(r[1],'w-4 h-4')+'<span>'+r[2]+'</span></button>';}).join('')+'</nav>'
+      +'<div class="ss-prof-col">'
 
-    +'<div><div class="text-meta font-semibold uppercase tracking-wide mb-2 px-1">계정</div><div class="card card-pad">'
-      +'<div class="flex items-center gap-5 mb-5">'
-        +'<button onclick="showAvatarPicker()" class="w-16 h-16 shrink-0 transition hover:opacity-80" title="아바타 변경">'+avatarCircle(currentUser.avatar,'w-16 h-16 text-3xl')+'</button>'
-        +'<div class="flex-1 min-w-0"><label class="field-label">이름</label><input type="text" id="profile-name" value="'+escHtml(currentUser.name||'')+'" class="input" onkeydown="if(event.key===\'Enter\'&&!event.isComposing)doSaveProfile()"></div>'
+    +'<div data-ptab="account"><div class="text-meta font-semibold uppercase tracking-wide mb-2 px-1">계정</div><div class="card card-pad"><div class="ss-prof-me">'
+      +'<button onclick="showAvatarPicker()" class="w-20 h-20 shrink-0 transition hover:opacity-80" title="아바타 변경">'+avatarCircle(currentUser.avatar,'w-20 h-20 text-4xl')+'</button>'
+      +'<div class="ss-prof-id">'
+        +'<div><label class="field-label">이름</label><input type="text" id="profile-name" value="'+escHtml(currentUser.name||'')+'" class="input" onkeydown="if(event.key===\'Enter\'&&!event.isComposing)doSaveProfile()"></div>'
+        +'<div><label class="field-label">이메일</label><div class="text-body" style="color:var(--text-2);padding-top:9px">'+escHtml(currentUser.email||'')+'</div>'+(joinedDate?'<div class="text-meta mt-1">가입일 · '+fmtDate(joinedDate)+'</div>':'')+'</div>'
       +'</div>'
-      +'<div class="mb-4"><label class="field-label">이메일</label><div class="text-body" style="color:var(--text-2)">'+escHtml(currentUser.email||'')+'</div>'
-        +(joinedDate?'<div class="text-meta mt-1">가입일 · '+fmtDate(joinedDate)+'</div>':'')
-      +'</div>'
-      +'<button onclick="doSaveProfile()" class="btn-primary w-full mb-2">'+icon('check','w-4 h-4')+'변경사항 저장</button>'
-      +'<button onclick="showChangePasswordModal()" class="btn-secondary w-full">'+icon('key-round','w-4 h-4')+'비밀번호 변경</button>'
+      +'<div class="ss-prof-act"><button onclick="doSaveProfile()" class="btn-primary">'+icon('check','w-4 h-4')+'변경사항 저장</button><button onclick="showChangePasswordModal()" class="btn-secondary">'+icon('key-round','w-4 h-4')+'비밀번호 변경</button></div>'
+    +'</div></div></div>'
+
+    +'<div data-ptab="projects"><div class="text-meta font-semibold uppercase tracking-wide mb-2 px-1">내 프로젝트</div><div class="card divide-hair">'
+      + (allProjects.length? allProjects.map(p=>
+          '<div class="flex items-center gap-3 px-4 py-3">'
+          +'<div class="w-8 h-8 rounded-lg flex items-center justify-center text-base shrink-0" style="background:#'+p.color+'1F;border:1px solid var(--border)">'+p.icon+'</div>'
+          +'<div class="min-w-0 flex-1"><div class="text-card-title truncate">'+escUser(p.name)+'</div><div class="text-meta mt-0.5">'+(p.ownerId===currentUser.uid?'소유자':'멤버')+'</div></div>'
+          +(p.ownerId!==currentUser.uid? '<button onclick="doLeaveProject(\''+p.id+'\',\''+escHtml(p.name).replace(/'/g,"\\'")+'\')" class="btn-sm shrink-0" style="background:var(--surface-2);color:var(--danger)" title="나가기">나가기</button>' : '')
+          +'</div>'
+        ).join('') : '<div class="p-4"><div class="text-meta">아직 참여 중인 프로젝트가 없어요</div></div>')
     +'</div></div>'
 
-    +'<div><div class="text-meta font-semibold uppercase tracking-wide mb-2 px-1">화면</div><div class="card card-pad">'
-      +'<button onclick="toggleLanguage()" class="w-full flex items-center justify-between py-1.5 mt-2">'
-        +'<span class="flex items-center gap-2.5 text-card-title">'+icon('languages','w-4 h-4')+(currentLang==='ko'?'Switch to English':'한국어로 전환')+'</span>'
-        +icon('chevron-right','w-4 h-4').replace('class="','style="color:var(--text-3)" class="')
-      +'</button>'
-      +'<div class="my-2" style="border-top:1px solid var(--border)"></div>'
+    +'<div data-ptab="account"><button onclick="doLogout()" class="btn-secondary w-full" style="color:var(--danger)">'+icon('log-out','w-4 h-4')+'로그아웃</button></div>'
+
+    +'<div data-ptab="danger"><div class="text-meta font-semibold uppercase tracking-wide mb-2 px-1">위험 구역</div><div class="card card-pad">'
+      +'<div class="flex items-center justify-between gap-3">'
+        +'<div class="min-w-0"><div class="text-card-title">계정 삭제</div><p class="text-meta mt-0.5">로그인 정보와 프로필이 삭제됩니다. 이미 만든 프로젝트/작업 등 팀과 공유된 데이터는 남아있어요.</p></div>'
+        +'<button onclick="showDeleteAccountModal()" class="btn-danger btn-sm shrink-0">'+icon('trash-2','w-3.5 h-3.5')+'삭제</button>'
+      +'</div>'
+    +'</div></div>'
+    +'</div><div class="ss-prof-col">'
+    +'<div data-ptab="display"><div class="text-meta font-semibold uppercase tracking-wide mb-2 px-1">화면</div><div class="card card-pad">'
       +'<div class="py-1"><div class="text-card-title mb-1.5">시작 화면</div>'
         +'<select onchange="setStartView(this.value)" class="input h-9">'
           +'<option value="dashboard" '+(getStartView()==='dashboard'?'selected':'')+'>대시보드</option>'
@@ -2359,7 +2666,7 @@ async function renderProfile(){
       +'</button>'
     +'</div></div>'
 
-    +'<div><div class="text-meta font-semibold uppercase tracking-wide mb-2 px-1">알림</div><div class="card card-pad">'
+    +'<div data-ptab="notif"><div class="text-meta font-semibold uppercase tracking-wide mb-2 px-1">알림</div><div class="card card-pad">'
       +'<button onclick="'+(notificationsEnabled()?'disableDueSoonNotifications()':'requestDueSoonNotifications()')+'" class="w-full flex items-center justify-between py-1.5">'
         +'<span class="flex items-center gap-2.5 text-card-title">'+icon('bell-ring','w-4 h-4')+'마감 임박 브라우저 알림</span>'
         +'<span class="'+(notificationsEnabled()?'badge-success':'badge-neutral')+'">'+(notificationsEnabled()?'켜짐':'꺼짐')+'</span>'
@@ -2387,26 +2694,9 @@ async function renderProfile(){
       +'</div>'
     +'</div></div>'
 
-    +'<div><div class="text-meta font-semibold uppercase tracking-wide mb-2 px-1">내 프로젝트</div><div class="card divide-hair">'
-      + (allProjects.length? allProjects.map(p=>
-          '<div class="flex items-center gap-3 px-4 py-3">'
-          +'<div class="w-8 h-8 rounded-lg flex items-center justify-center text-base shrink-0" style="background:#'+p.color+'1F;border:1px solid var(--border)">'+p.icon+'</div>'
-          +'<div class="min-w-0 flex-1"><div class="text-card-title truncate">'+escUser(p.name)+'</div><div class="text-meta mt-0.5">'+(p.ownerId===currentUser.uid?'소유자':'멤버')+'</div></div>'
-          +(p.ownerId!==currentUser.uid? '<button onclick="doLeaveProject(\''+p.id+'\',\''+escHtml(p.name).replace(/'/g,"\\'")+'\')" class="btn-sm shrink-0" style="background:var(--surface-2);color:var(--danger)" title="나가기">나가기</button>' : '')
-          +'</div>'
-        ).join('') : '<div class="p-4"><div class="text-meta">아직 참여 중인 프로젝트가 없어요</div></div>')
     +'</div></div>'
-
-    +'<button onclick="doLogout()" class="btn-danger w-full">'+icon('log-out','w-4 h-4')+'로그아웃</button>'
-
-    +'<div><div class="text-meta font-semibold uppercase tracking-wide mb-2 px-1">위험 구역</div><div class="card card-pad">'
-      +'<div class="flex items-center justify-between gap-3">'
-        +'<div class="min-w-0"><div class="text-card-title">계정 삭제</div><p class="text-meta mt-0.5">로그인 정보와 프로필이 삭제됩니다. 이미 만든 프로젝트/작업 등 팀과 공유된 데이터는 남아있어요.</p></div>'
-        +'<button onclick="showDeleteAccountModal()" class="btn-danger btn-sm shrink-0">'+icon('trash-2','w-3.5 h-3.5')+'삭제</button>'
-      +'</div>'
-    +'</div></div>'
-    +'</div>'
   );
+  setProfileTab(window.profileTab||'account');
   refreshIcons();
 }
 function showChangePasswordModal(){
@@ -2458,12 +2748,13 @@ async function doConfirmDeleteAccount(){
 function showAvatarPicker(){
   showModal(modalWrap('아바타 선택',
     '<div>'
-    +'<label class="btn-secondary w-full mb-3 cursor-pointer">'+icon('image-up','w-4 h-4')+'사진 업로드<input type="file" accept="image/*" class="hidden" onchange="doUploadAvatarUI(event)"></label>'
+    +(FILE_UPLOAD_ENABLED?'<label class="btn-secondary w-full mb-3 cursor-pointer">'+icon('image-up','w-4 h-4')+'사진 업로드<input type="file" accept="image/*" class="hidden" onchange="doUploadAvatarUI(event)"></label>':'')
     +'<div class="grid grid-cols-6 gap-2">'+AVATARS.map(a=>'<button onclick="doChangeAvatar(\''+a+'\')" class="text-3xl aspect-square rounded-xl flex items-center justify-center transition hover:scale-105" style="background:var(--surface-2)">'+a+'</button>').join('')+'</div>'
     +'</div>',''
   ));
 }
 async function doUploadAvatarUI(ev){
+  if(!FILE_UPLOAD_ENABLED){ ssUploadDisabledNotice(); return; }
   var file=ev.target.files[0]; if(!file)return;
   showLoading();
   var r=await ssUploadAvatar(file);
@@ -2480,7 +2771,7 @@ async function doLogout(){
   hideLoading();
   // signOut()이 실패해도(네트워크 오류 등) 반드시 여기서 로딩을 내리고 결과를 알려준다 —
   // 예전엔 실패 시 예외가 그대로 던져져서 로딩 화면에 멈춘 것처럼 보였다.
-  if(r.success){ showToast('로그아웃되었습니다','success'); showAuthScreen(); }
+  if(r.success){ stopChatUnreadListener(); showToast('로그아웃되었습니다','success'); showAuthScreen(); }
   else showToast(r.error||'로그아웃에 실패했습니다','error');
 }
 
@@ -2539,7 +2830,7 @@ async function renderMyTasks(){
   });
   var starredOnly = all.filter(t=>(t.starredBy||[]).indexOf(currentUser.uid)!==-1);
   // #A1 즐겨찾기 전용 보기 — 토글 시 진행중/완료 목록도 즐겨찾기로 한정
-  var scope = myTasksStarredOnly ? starredOnly : all;
+  var scope = all;
   var active = scope.filter(t=>t.status!=='done').sort((a,b)=>(a.dueDate||'9999').localeCompare(b.dueDate||'9999'));
   var done = scope.filter(t=>t.status==='done');
 
@@ -2553,14 +2844,69 @@ async function renderMyTasks(){
     +'</div>';
   }
 
-  var actions = '<button onclick="myTasksStarredOnly=!myTasksStarredOnly;renderMyTasks()" class="'+(myTasksStarredOnly?'btn-primary':'btn-secondary')+'" title="즐겨찾기만 보기">'+icon('star','w-4 h-4')+(myTasksStarredOnly?'즐겨찾기만':'전체')+'</button>';
+  var pad2=function(n){ return (n<10?'0':'')+n; }, nowD=new Date(), todayStr=nowD.getFullYear()+'-'+pad2(nowD.getMonth()+1)+'-'+pad2(nowD.getDate());
+  var dueToday=active.filter(function(t){ return t.dueDate===todayStr; }).length;
+  var rate=(active.length+done.length)?Math.round(done.length/(active.length+done.length)*100):0;
+  var myStrip='<div class="card ss-strip">'
+    +'<div><span class="ss-tile ss-tone-primary">'+icon('list-checks','w-5 h-5')+'</span><div class="min-w-0"><div class="text-meta">남은 작업</div><div class="ss-stat-val">'+active.length+'개</div></div></div>'
+    +'<div><span class="ss-tile ss-tone-warning">'+icon('clock','w-5 h-5')+'</span><div class="min-w-0"><div class="text-meta">오늘 마감</div><div class="ss-stat-val">'+dueToday+'개</div></div></div>'
+    +'<div><span class="ss-tile ss-tone-success">'+icon('check','w-5 h-5')+'</span><div class="min-w-0"><div class="text-meta">완료한 작업</div><div class="ss-stat-val">'+done.length+'개</div></div></div>'
+    +'<div><div class="min-w-0 flex-1"><div class="flex items-center justify-between"><span class="text-meta">달성률</span><span class="ss-stat-val" style="font-size:16px">'+rate+'%</span></div><div class="progress-track h-2 mt-2"><div class="progress-fill" style="width:'+rate+'%"></div></div></div></div>'
+    +'</div>';
 
-  setContent(pageHeader(t('mytasks'), all.length+'개 작업이 할당되어 있어요'+(myTasksStarredOnly?' · 즐겨찾기 '+starredOnly.length+'개만 표시 중':''), actions)
-    +'<div class="px-6 pb-8 max-w-2xl mx-auto space-y-6">'
-    + (!myTasksStarredOnly && starredOnly.length? '<div><h3 class="text-section-title mb-2.5 flex items-center gap-1.5">'+icon('star','w-4 h-4')+'즐겨찾기</h3><div class="card divide-hair">'+starredOnly.map(taskRow).join('')+'</div></div>' : '')
-    + '<div><h3 class="text-section-title mb-2.5">진행 중 ('+active.length+')</h3>'+(active.length?'<div class="card divide-hair">'+active.map(taskRow).join('')+'</div>':'<div class="card">'+emptyState('user-check', myTasksStarredOnly?'즐겨찾기한 작업이 없어요':'할당된 작업이 없어요', myTasksStarredOnly?'작업 상세에서 ★을 눌러 즐겨찾기에 추가해보세요.':'작업을 추가/수정할 때 "담당자"를 나로 지정하거나, 팀원이 배정하면 여기에 표시됩니다.','')+'</div>')+'</div>'
-    + (done.length? '<div><h3 class="text-section-title mb-2.5">완료 ('+done.length+')</h3><div class="card divide-hair">'+done.map(taskRow).join('')+'</div></div>' : '')
-    +'</div>');
+  // 탭(전체 · 오늘 마감 · 중요 작업 · 완료) + 검색 + 보기 전환
+  var tab=window.myTasksTab||'all', q=(window.myTasksQuery||'').trim().toLowerCase();
+  var tabs=[['all','전체',all.length],['today','오늘 마감',all.filter(function(t){return t.status!=='done'&&t.dueDate===todayStr;}).length],['star','중요 작업',starredOnly.length],['done','완료',all.filter(function(t){return t.status==='done';}).length]];
+  var shown=all.filter(function(t){
+    if(tab==='today' && !(t.status!=='done'&&t.dueDate===todayStr)) return false;
+    if(tab==='star' && (t.starredBy||[]).indexOf(currentUser.uid)===-1) return false;
+    if(tab==='done' && t.status!=='done') return false;
+    if(q && ((t.title||'')+' '+(t.projectName||'')).toLowerCase().indexOf(q)===-1) return false;
+    return true;
+  });
+  var view=window.myTasksView||'board';
+  var tabBar='<div class="card ss-filterbar">'
+    +'<div class="flex items-center gap-1.5 flex-wrap">'+tabs.map(function(c){return '<button class="ss-chip'+(tab===c[0]?' active':'')+'" onclick="myTasksTab=\''+c[0]+'\';renderMyTasks()">'+c[1]+'<span class="ss-count">'+c[2]+'</span></button>';}).join('')+'</div>'
+    +'<div class="ss-filter-search ml-auto"><span>'+icon('search','w-4 h-4')+'</span><input type="text" id="mytasks-q" class="input" placeholder="내 작업 검색" aria-label="내 작업 검색" value="'+escHtml(window.myTasksQuery||'')+'" oninput="myTasksQuery=this.value;clearTimeout(window.__mtq);window.__mtq=setTimeout(function(){renderMyTasks().then(function(){var e=document.getElementById(\'mytasks-q\');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}})},300)"></div>'
+    +'<div class="ss-seg"><button class="'+(view==='board'?'on':'')+'" onclick="myTasksView=\'board\';renderMyTasks()" aria-label="보드로 보기" title="보드">'+icon('layout-grid','w-4 h-4')+'</button><button class="'+(view==='list'?'on':'')+'" onclick="myTasksView=\'list\';renderMyTasks()" aria-label="목록으로 보기" title="목록">'+icon('list','w-4 h-4')+'</button></div>'
+    +'</div>';
+
+  function dueLabel(t){
+    if(t.status==='done') return '<span class="ss-due">'+icon('check','w-3 h-3')+'완료</span>';
+    if(!t.dueDate) return '<span class="ss-due">마감 없음</span>';
+    var dd=new Date(t.dueDate); dd.setHours(0,0,0,0); var tt=new Date(); tt.setHours(0,0,0,0); var diff=Math.round((dd-tt)/86400000);
+    return '<span class="ss-due'+(diff<=0?' late':'')+'">'+icon('calendar','w-3 h-3')+(diff===0?'오늘':diff===1?'내일':diff<0?(-diff)+'일 지연':(dd.getMonth()+1)+'월 '+dd.getDate()+'일')+'</span>';
+  }
+  function boardCard(t){
+    var act = t.status==='done' ? '<div class="ss-card-act done">'+icon('check','w-3.5 h-3.5')+'완료됨</div>'
+      : '<button class="ss-card-act" onclick="event.stopPropagation();doMyTaskAdvance(\''+t.id+'\',\''+t.status+'\')">'+(t.status==='inprogress'?'완료로 이동':'작업 시작')+icon(t.status==='inprogress'?'check':'chevron-right','w-3.5 h-3.5')+'</button>';
+    return '<div class="ss-bcard" onclick="selectProject(\''+t.projectId+'\');showTaskDetail(\''+t.id+'\')">'
+      +'<div class="flex items-center justify-between mb-2">'+priorityBadge(t.priority)+((t.starredBy||[]).indexOf(currentUser.uid)!==-1?icon('star','w-3.5 h-3.5').replace('class="','style="color:var(--warning)" class="'):'')+'</div>'
+      +'<div class="ss-task-title'+(t.status==='done'?' done':'')+'">'+escUser(t.title)+'</div>'
+      +'<div class="text-meta mt-1 mb-3 truncate">'+escHtml(t.projectName)+'</div>'
+      +'<div class="flex items-center justify-between">'+dueLabel(t)+'<span class="ss-mini-av" translate="no">'+escHtml(Array.from((currentUser.name||'?').toString())[0])+'</span></div>'
+      +'<div class="mt-3 pt-3" style="border-top:1px solid var(--border)">'+act+'</div></div>';
+  }
+  var cols=[['todo','할 일','시작 전','var(--text-3)'],['inprogress','진행 중','집중 작업','var(--info)'],['done','완료','이번 주 완료','var(--success)']];
+  var body = !shown.length
+    ? '<div class="card">'+emptyState('user-check', all.length?'조건에 맞는 작업이 없어요':'할당된 작업이 없어요', all.length?'다른 탭이나 검색어를 선택해 보세요.':'프로젝트에서 나에게 작업이 할당되면 여기에 표시돼요.','')+'</div>'
+    : view==='list'
+      ? '<div class="card divide-hair">'+shown.map(taskRow).join('')+'</div>'
+      : '<div class="ss-board">'+cols.map(function(c){
+          var items=shown.filter(function(t){return (t.status||'todo')===c[0] || (c[0]==='todo' && ['todo','inprogress','done'].indexOf(t.status)===-1);});
+          return '<section class="ss-bcol"><header><i style="background:'+c[3]+'"></i><b>'+c[1]+'</b><span class="ss-count">'+items.length+'</span><em>'+c[2]+'</em></header>'
+            +(items.length?items.map(boardCard).join(''):'<div class="ss-bempty">작업이 없어요</div>')+'</section>';
+        }).join('')+'</div>';
+
+  setContent(pageHeader(t('mytasks'), '오늘 해야 할 일을 빠르게 확인하고 처리하세요.', '<button onclick="showAddTaskModal()" class="btn-primary">'+icon('plus','w-4 h-4')+'새 작업</button>')
+    +'<div class="px-6 pb-8 space-y-4">'+myStrip+tabBar+'<div class="text-meta">'+shown.length+'개의 작업</div>'+body+'</div>');
+}
+async function doMyTaskAdvance(taskId,status){
+  var next=status==='todo'?'inprogress':'done';
+  var r=await ssMoveTask(taskId,next);
+  if(!r.success){ showToast(r.error||'상태를 바꾸지 못했습니다','error'); return; }
+  showToast(next==='done'?'완료 처리했어요 🎉':'작업을 시작했어요','success');
+  renderMyTasks();
 }
 
 /* ================================================================
@@ -2701,12 +3047,13 @@ function cmdkKeydown(ev){
    #2 키보드 단축키
    ================================================================ */
 /* ================= 도움말 · 자주 묻는 질문 · 개인정보 안내 ================= */
-function showHelpModal(tab){
+function ssHelpData(){
   var faq=[
     ['처음 어떻게 시작하나요?','가입·로그인 후 대시보드의 “첫 프로젝트 만들기”로 프로젝트를 만들고, 팀원 초대 → 작업 추가 순서로 진행하세요.'],
     ['팀원은 어떻게 초대하나요?','프로젝트의 “팀 멤버” 화면에서 상대 이메일로 초대하세요. 상대가 같은 이메일로 가입한 뒤 알림에서 수락하면 참여됩니다.'],
     ['할 일에 담당자와 마감일을 정하려면?','“새 작업”에서 담당자·마감일·우선순위를 고르거나, 작업을 눌러 상세 화면에서 수정할 수 있어요.'],
-    ['프로젝트를 삭제하고 싶어요','프로젝트 카드의 휴지통 아이콘 또는 개요의 “프로젝트 삭제”를 누르세요. 프로젝트 소유자만 가능하며 삭제 직후 “실행취소”로 되돌릴 수 있어요.'],
+    ['프로젝트를 삭제하고 싶어요','프로젝트 카드의 휴지통 아이콘 또는 대시보드의 “프로젝트 삭제”를 누르세요. 프로젝트 소유자만 가능하며 삭제 직후 “실행취소”로 되돌릴 수 있어요.'],
+    ['실수로 삭제한 프로젝트를 되살리고 싶어요','대시보드의 “보관함”에 들어가면 아래쪽 “삭제한 프로젝트”에서 소유자가 복구할 수 있어요.'],
     ['비밀번호를 잊어버렸어요','로그인 화면의 “비밀번호를 잊으셨나요?”에서 가입 이메일로 재설정 링크를 받을 수 있어요.'],
     ['초대를 보냈는데 상대에게 안 보여요','상대가 보낸 이메일과 같은 이메일로 가입·로그인했는지 확인하고, 알림 메뉴를 새로고침해 보세요.']
   ];
@@ -2717,6 +3064,17 @@ function showHelpModal(tab){
     ['삭제','프로필 > 계정 삭제에서 계정을 삭제할 수 있습니다. 단, 팀과 공유된 프로젝트·작업 데이터는 남을 수 있습니다.'],
     ['안내','이 서비스는 졸업 프로젝트(Team Plus)로 제작된 학습용 서비스입니다. 중요한 개인정보나 기밀 자료는 입력하지 마세요.']
   ];
+  return {faq:faq,priv:priv};
+}
+var helpTab='faq', helpQuery='';
+function showHelpModal(tab){
+  // 로그인한 상태에서는 팝업 대신 일반 페이지(도움말 화면)로 연다 — '창 위의 창' 느낌을 없앤다
+  if(typeof isLoggedIn!=='undefined' && isLoggedIn){
+    helpTab=tab||'faq'; helpQuery='';
+    if(document.getElementById('modal').innerHTML) closeModal();
+    showView('help'); return;
+  }
+  var HD=ssHelpData(), faq=HD.faq, priv=HD.priv;
   var tabs=[['faq','자주 묻는 질문'],['privacy','개인정보·이용 안내'],['contact','문의']];
   tab=tab||'faq';
   var body='<div class="flex gap-1.5 mb-3 flex-wrap">'+tabs.map(function(t){return '<button onclick="showHelpModal(\''+t[0]+'\')" class="'+(t[0]===tab?'btn-primary':'btn-secondary')+'" style="padding:6px 12px;font-size:13px">'+t[1]+'</button>';}).join('')+'</div>';
@@ -2730,6 +3088,28 @@ function showHelpModal(tab){
       +'<p class="text-meta mt-3">자주 묻는 질문 탭에서 먼저 해결 방법을 찾아보세요.</p>';
   }
   showModal(modalWrap('도움말',body,''));
+}
+function helpListHtml(){
+  var HD=ssHelpData(), q=(helpQuery||'').trim().toLowerCase();
+  var row=function(f){ return '<details class="ss-faq"><summary><span class="text-card-title">'+f[0]+'</span></summary><p class="text-body">'+f[1]+'</p></details>'; };
+  if(q){
+    var hits=HD.faq.concat(HD.priv).filter(function(f){ return (f[0]+' '+f[1]).toLowerCase().indexOf(q)!==-1; });
+    return hits.length? '<div class="card divide-hair">'+hits.map(row).join('')+'</div>'
+      : '<div class="card">'+emptyState('search-x','검색 결과가 없어요','다른 단어로 찾아보거나 “문의” 탭을 확인해 보세요.','')+'</div>';
+  }
+  if(helpTab==='privacy') return '<div class="card divide-hair">'+HD.priv.map(function(f){ return '<div class="ss-faq-static"><div class="text-card-title">'+f[0]+'</div><p class="text-body">'+f[1]+'</p></div>'; }).join('')+'</div>';
+  if(helpTab==='contact') return '<div class="card card-pad"><p class="text-body">사용 중 문제가 있거나 건의할 내용이 있다면 같은 팀 운영자(프로젝트 소유자)에게 알려 주세요. 화면 캡처와 함께 “어느 화면에서 무엇을 눌렀는지” 알려 주시면 빠르게 확인할 수 있어요.</p><p class="text-meta mt-3">자주 묻는 질문에서 먼저 해결 방법을 찾아보세요.</p></div>';
+  return '<div class="card divide-hair">'+HD.faq.map(row).join('')+'</div>';
+}
+function onHelpSearch(v){ helpQuery=v; var el=document.getElementById('help-list'); if(el){ el.innerHTML=helpListHtml(); refreshIcons(); } }
+function renderHelp(){
+  var tabs=[['faq','자주 묻는 질문'],['privacy','개인정보·이용 안내'],['contact','문의']];
+  var chips='<div class="flex gap-2 flex-wrap">'+tabs.map(function(t){ return '<button onclick="helpTab=\''+t[0]+'\';helpQuery=\'\';renderHelp()" class="ss-chip'+(t[0]===helpTab&&!helpQuery?' active':'')+'">'+t[1]+'</button>'; }).join('')
+    +'<button onclick="showShortcutsModal()" class="ss-chip">'+icon('keyboard','w-3.5 h-3.5')+'키보드 단축키</button></div>';
+  var search='<div class="relative">'+icon('search','w-4 h-4 absolute').replace('class="','style="color:var(--text-3);left:14px;top:50%;transform:translateY(-50%)" class="')
+    +'<input type="text" id="help-search" class="input" style="height:44px;padding-left:2.5rem" placeholder="궁금한 내용을 검색하세요" aria-label="도움말 검색" value="'+escHtml(helpQuery)+'" oninput="onHelpSearch(this.value)"></div>';
+  setContent(pageHeader('도움말','궁금한 내용을 검색하거나 자주 묻는 질문을 확인해 보세요')
+    +'<div class="px-6 pb-10 max-w-3xl mx-auto space-y-4">'+search+chips+'<div id="help-list">'+helpListHtml()+'</div></div>');
 }
 function showShortcutsModal(){
   var rows=[
@@ -3468,7 +3848,7 @@ function projectTabBar(currentViewName){
   }
   var bellBtn='<button onclick="openNotifPopover(event)" class="tabbar-popover-trigger icon-btn shrink-0 relative" title="알림" aria-label="알림 열기">'+icon('bell','w-4 h-4')
     +'<span class="tabbar-bell-badge" style="display:'+(notificationCount>0?'flex':'none')+';position:absolute;top:1px;right:1px;min-width:15px;height:15px;padding:0 4px;border-radius:999px;background:var(--danger);color:#fff;font-size:10px;font-weight:700;align-items:center;justify-content:center;line-height:1">'+(notificationCount>99?'99+':notificationCount)+'</span></button>';
-  return '<div class="px-6 pt-4 -mb-1"><div class="flex items-center gap-1 overflow-x-auto pb-3" style="border-bottom:1px solid var(--border)">'+tabs+subToggle+'<div class="flex-1"></div>'+bellBtn+'</div></div>';
+  return '<div class="px-6 pt-4 -mb-1 lg:hidden"><div class="flex items-center gap-1 overflow-x-auto pb-3" style="border-bottom:1px solid var(--border)">'+tabs+subToggle+'<div class="flex-1"></div><span class="lg:hidden">'+bellBtn+'</span></div></div>';
 }
 function openSubtabMenu(ev,groupKey,currentViewName){
   var group=PROJECT_TAB_GROUPS.find(g=>g.key===groupKey); if(!group) return;

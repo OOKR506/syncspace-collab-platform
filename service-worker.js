@@ -2,9 +2,9 @@
 // 캐시 이름을 올릴 때마다(v2 -> v3) 예전 캐시는 activate 단계에서 자동 삭제됩니다.
 // 사이드바 색상 등 UI 변경이 배포됐는데도 예전 화면이 보인다는 신고가 있어
 // v3로 올리고, 오래된 캐시 정리 로직을 추가했습니다.
-const CACHE_NAME = 'syncspace-shell-v10';
+const CACHE_NAME = 'syncspace-shell-v19';
 const SHELL_FILES = [
-  './index.html','./app-v3.js','./i18n-en.js','./tailwind.css','./manifest.json','./icon.svg','./icon-192.png','./icon-512.png','./icon-180.png',
+  './index.html','./app-v3.js','./guest-mode.js','./i18n-en.js','./tailwind.css','./manifest.json','./icon.svg','./icon-192.png','./icon-512.png','./icon-180.png',
   './firebase-config.js','./firebase-auth.js','./firebase-projects.js','./firebase-tasks.js',
   './firebase-calendar.js','./firebase-templates.js',
   './firebase-extras.js','./firebase-storage.js'

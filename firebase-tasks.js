@@ -280,6 +280,21 @@ async function ssSendChatMessage(projectId, content) {
   } catch (e) { return { success: false, error: e.message }; }
 }
 
+// 채팅 검색용: 최근 n개 메시지를 한 번에 가져온다 (Firestore에는 본문 검색이 없어 화면에서 걸러낸다)
+async function ssGetRecentChatMessages(projectId, n) {
+  try {
+    var snap = await db.collection('projects').doc(projectId).collection('chat')
+      .orderBy('createdAt', 'desc').limit(n || 300).get();
+    var messages = [];
+    snap.forEach(doc => {
+      var d = doc.data();
+      messages.push({ id: doc.id, ...d, createdAt: d.createdAt ? d.createdAt.toDate() : null });
+    });
+    messages.reverse();
+    return { success: true, messages: messages };
+  } catch (e) { return { success: false, messages: [], error: e.message }; }
+}
+
 async function ssGetChatMessages(projectId) {
   try {
     var snap = await db.collection('projects').doc(projectId).collection('chat')
